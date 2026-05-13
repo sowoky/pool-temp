@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Monte Sano Club{% endblock %}</title>
+  <link rel="icon" href="https://montesanoclub.org/images/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Roboto+Serif:opsz,wght@8..144,300;8..144,400;8..144,500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+
+<header class="site-header">
+  <nav class="nav">
+    <div class="nav-side nav-left">
+      <a href="#news">News</a>
+      <a href="#events">Events</a>
+      <a href="#members">Members</a>
+    </div>
+    <a href="/" class="brand">
+      <img src="https://montesanoclub.org/images/MonteSanoClub2-teal+white.svg"
+           alt="Monte Sano Club" class="brand-logo">
+    </a>
+    <div class="nav-side nav-right">
+      <a href="#makos" class="nav-stack">
+        <span>Makos</span>
+        <span class="nav-sub">Swim &amp; Dive</span>
+      </a>
+      <a href="/temperature">Pool</a>
+      <a href="#about">About Us</a>
+    </div>
+  </nav>
+  <svg class="header-wave" viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path fill="#bbe5f0" d="M0,0 L0,40 C240,80 480,0 720,40 C960,80 1200,0 1440,40 L1440,0 Z"></path>
+  </svg>
+</header>
+
+<main>
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="site-footer">
+  <svg class="footer-wave" viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path fill="#004f5e" d="M0,40 C240,80 480,0 720,40 C960,80 1200,0 1440,40 L1440,100 L0,100 Z"></path>
+  </svg>
+
+  <div class="footer-inner">
+    <div class="footer-grid">
+      <div class="footer-badge">
+        <img src="https://montesanoclub.org/images/MonteSanoClub-badge-lightblue.svg"
+             alt="Monte Sano Club est. 1962">
+      </div>
+      <div>
+        <h4>Address</h4>
+        <p>3609 Georgetta Dr SE<br>Huntsville, AL 35801</p>
+      </div>
+      <div>
+        <h4>Contact</h4>
+        <p>
+          <a href="tel:256-533-0926">256-533-0926</a><br>
+          <a href="mailto:board@montesanoclub.org">board@montesanoclub.org</a>
+        </p>
+      </div>
+      <div class="footer-links">
+        <a href="#members">Membership</a>
+        <a href="#makos">Swim &amp; Dive</a>
+        <a href="#events">Events</a>
+        <a href="#news">News</a>
+        <a href="/temperature">Pool Temp</a>
+        <a href="#about">About</a>
+        <a href="#contact">Contact</a>
+        <a href="https://www.facebook.com/groups/MonteSanoClub/" target="_blank" rel="noopener">Facebook</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>&copy; 2026 Monte Sano Club. All rights reserved.</p>
+      <p class="footer-bottom-meta">Live data via the pool-side sensor — updates every minute.</p>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

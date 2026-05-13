@@ -1,0 +1,18 @@
+{
+    email kyleroden@gmail.com
+    admin off
+}
+
+# Public-facing pool temp site. Caddy terminates TLS on 443, fetches a
+# Let's Encrypt cert automatically via HTTP-01 challenge on 80, and
+# reverse-proxies to the Flask/Waitress server bound to localhost:18080.
+temp.kyro-labs.com {
+    reverse_proxy localhost:18080
+    encode gzip zstd
+}
+
+# Uncomment when kyleroden.com's nameservers land at Cloudflare (or just
+# stay on Namecheap A records and let Caddy own TLS there too):
+# kyleroden.com, www.kyleroden.com {
+#     reverse_proxy localhost:18080
+# }

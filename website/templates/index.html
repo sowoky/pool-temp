@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Monte Sano Club &mdash; Good Views. Good Vibes.{% endblock %}
+
+{% block content %}
+
+<section class="hero">
+  <div class="hero-bg" style="background-image:url('https://montesanoclub.org/images/hero-mountain-view.png')"></div>
+  <div class="hero-overlay"></div>
+
+  <div class="hero-inner">
+    <h1>
+      <span class="hero-pretitle">Welcome to</span>
+      <span class="hero-title">Monte Sano Club</span>
+    </h1>
+    <p class="hero-lead">
+      Where summer happens on the mountain &mdash; pool, courts, and a porch full of neighbors,
+      with the same view every July afternoon for the last sixty years.
+    </p>
+    <div class="hero-btns">
+      <div class="hero-btn-row">
+        <a class="btn-ghost" href="#events">Events</a>
+        <a class="btn-ghost" href="#makos">Makos</a>
+        <a class="btn-ghost" href="#news">News</a>
+      </div>
+      <a class="btn-ghost" href="/temperature">Pool Temp &mdash; Live</a>
+    </div>
+  </div>
+
+  <svg class="hero-wave" viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path fill="#004f5e" d="M0,40 C240,80 480,0 720,40 C960,80 1200,0 1440,40 L1440,100 L0,100 Z"></path>
+  </svg>
+
+  <div class="hero-badge">
+    <img src="https://montesanoclub.org/images/GoodViewsGoodVibes-blueonteal.svg"
+         alt="Good Views Good Vibes">
+  </div>
+</section>
+
+<section class="temp-strip" id="live">
+  <div class="temp-strip-inner">
+    <a class="temp-card temp-card-pool" href="/temperature?focus=pool" data-source="pool">
+      <span class="temp-label">Pool Temp</span>
+      <span class="temp-value" data-bind="pool.temp">&mdash;</span>
+      <span class="temp-meta" data-bind="pool.meta">Waiting for a reading&hellip;</span>
+    </a>
+    <a class="temp-card temp-card-air" href="/temperature?focus=outdoor" data-source="outdoor">
+      <span class="temp-label">Outdoor Air</span>
+      <span class="temp-value" data-bind="outdoor.temp">&mdash;</span>
+      <span class="temp-meta" data-bind="outdoor.meta">Waiting for a reading&hellip;</span>
+    </a>
+  </div>
+</section>
+
+<section class="intro">
+  <div class="intro-inner">
+    <h2 class="font-serif">
+      <span class="intro-h2-1">Live conditions from</span>
+      <span class="intro-h2-2">the pool, all summer long.</span>
+    </h2>
+    <p>
+      A small sensor strapped to the filter return line reads the water every sixty seconds and
+      posts straight to this page. Outdoor air comes from a neighbor&rsquo;s weather station up the
+      ridge. No app to install, nothing to log into &mdash; if you&rsquo;re wondering whether the pool
+      is warm yet, this tells you.
+    </p>
+  </div>
+  <svg class="intro-wave" viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path fill="#f4f1ed" d="M0,40 C240,80 480,0 720,40 C960,80 1200,0 1440,40 L1440,100 L0,100 Z"></path>
+  </svg>
+</section>
+
+<section class="features">
+  <div class="features-grid">
+    <a class="feature-card" href="/temperature">
+      <div class="feature-image"
+           style="background-image:url('https://montesanoclub.org/images/pool-swim-team.png')"></div>
+      <div class="feature-body">
+        <h3>Pool Temperature Right Now</h3>
+        <p>Live water and air temperatures, plus 24-hour and weekly history charts.</p>
+        <span class="feature-link">View History</span>
+      </div>
+    </a>
+    <a class="feature-card" href="#events">
+      <div class="feature-image"
+           style="background-image:url('https://montesanoclub.org/images/community-member.png')"></div>
+      <div class="feature-body">
+        <h3>Events &amp; Teams Bring the Community Together</h3>
+        <p>Band nights on the patio, swim meets, summer socials &mdash; the whole season&rsquo;s lineup.</p>
+        <span class="feature-link">Events</span>
+      </div>
+    </a>
+    <a class="feature-card" href="#news">
+      <div class="feature-image"
+           style="background-image:url('https://montesanoclub.org/images/monte-sano-sign.png')"></div>
+      <div class="feature-body">
+        <h3>News &amp; Announcements</h3>
+        <p>Closures, swim-team updates, board notes, the stuff members actually need to know.</p>
+        <span class="feature-link">News</span>
+      </div>
+    </a>
+  </div>
+</section>
+
+<section class="cta">
+  <div class="cta-inner">
+    <h2>Ready to take a dip?</h2>
+    <p>Live data is free to watch. Membership&rsquo;s the way you actually get in the water.</p>
+    <div class="cta-btns">
+      <a class="btn-orange" href="#members">Apply for Membership</a>
+      <a class="btn-outline" href="/temperature">See the Pool Temp</a>
+    </div>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block head_extra %}
+<script src="{{ url_for('static', filename='app.js') }}" defer></script>
+{% endblock %}

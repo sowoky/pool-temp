@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Pool Temperature &mdash; Monte Sano Club{% endblock %}
+
+{% block content %}
+
+<section class="page-hero">
+  <div class="page-hero-inner">
+    <h1>
+      <span class="hero-pretitle">Live conditions</span>
+      <span class="hero-title">Pool &amp; Air Temperature</span>
+    </h1>
+    <p class="hero-lead">Water reads every sixty seconds from the filter return line. Air reads from a Wunderground station up the ridge.</p>
+  </div>
+  <svg class="hero-wave" viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path fill="#f4f1ed" d="M0,40 C240,80 480,0 720,40 C960,80 1200,0 1440,40 L1440,100 L0,100 Z"></path>
+  </svg>
+</section>
+
+<section class="temp-page">
+  <div class="temp-strip-inner">
+    <div class="temp-card temp-card-pool">
+      <span class="temp-label">Pool</span>
+      <span class="temp-value" data-bind="pool.temp">&mdash;</span>
+      <span class="temp-meta" data-bind="pool.meta">Waiting for a reading&hellip;</span>
+    </div>
+    <div class="temp-card temp-card-air">
+      <span class="temp-label">Outdoor Air</span>
+      <span class="temp-value" data-bind="outdoor.temp">&mdash;</span>
+      <span class="temp-meta" data-bind="outdoor.meta">Waiting for a reading&hellip;</span>
+    </div>
+  </div>
+
+  <div class="range-row">
+    <div class="range-buttons" role="tablist" aria-label="Time range">
+      <button class="range-btn" data-range="24h" aria-pressed="true">Last 24 hours</button>
+      <button class="range-btn" data-range="7d"  aria-pressed="false">Last 7 days</button>
+      <button class="range-btn" data-range="30d" aria-pressed="false">Last 30 days</button>
+    </div>
+    <span class="muted small" id="range-meta"></span>
+  </div>
+
+  <div class="chart-wrap">
+    <canvas id="tempChart" height="120"></canvas>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat"><span class="stat-label">Pool min</span><span class="stat-value" data-stat="pool.min">&mdash;</span></div>
+    <div class="stat"><span class="stat-label">Pool max</span><span class="stat-value" data-stat="pool.max">&mdash;</span></div>
+    <div class="stat"><span class="stat-label">Pool avg</span><span class="stat-value" data-stat="pool.avg">&mdash;</span></div>
+    <div class="stat"><span class="stat-label">Air min</span><span class="stat-value" data-stat="outdoor.min">&mdash;</span></div>
+    <div class="stat"><span class="stat-label">Air max</span><span class="stat-value" data-stat="outdoor.max">&mdash;</span></div>
+    <div class="stat"><span class="stat-label">Air avg</span><span class="stat-value" data-stat="outdoor.avg">&mdash;</span></div>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='app.js') }}" defer></script>
+<script src="{{ url_for('static', filename='temperature.js') }}" defer></script>
+{% endblock %}
