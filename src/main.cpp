@@ -2,35 +2,26 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <ESPmDNS.h>
+#include <ArduinoOTA.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <ArduinoJson.h>
 
-#include "secrets.h"   // DEV_SSID / DEV_PASS / FALLBACK_SSID / FALLBACK_PASS
-                       // -- copy secrets.example.h to secrets.h and fill in.
+#include "secrets.h"      // DEV_SSID / DEV_PASS / FALLBACK_SSID / FALLBACK_PASS
+#include "config.h"       // g_config / loadConfig / saveConfig
+#include "admin_page.h"   // adminBegin / adminLoop / g_telemetry
 
-// Endpoints tried in order. First 2xx response wins. NULL-terminated.
-// 1. Real club website -- not live yet, will 4xx/5xx for now and we fall through.
-// 2. Static ngrok URL backed by the Flask app on the home desktop. Stable
-//    forever; works regardless of LAN IP changes.
-static const char* ENDPOINTS[] = {
-  "http://montesanoclub.org/temps/update",
-  "https://niece-tweet-flame.ngrok-free.dev/reading",
-  nullptr,
-};
-static const char* API_KEY  = "dev-key";
-
-static const uint8_t ONEWIRE_PIN     = 13;
-static const uint32_t SAMPLE_PERIOD  = 60UL * 1000UL;   // 60s
-static const float    MIN_VALID_F    = 0.0f;
-static const float    MAX_VALID_F    = 130.0f;
-static const uint8_t  SENSOR_RES_BIT = 12;              // 12-bit = 0.0625°F resolution, ~750ms convert
+// Hardware-fixed; not in NVS.
+static const uint8_t  ONEWIRE_PIN     = 13;
+static const uint8_t  SENSOR_RES_BIT  = 12;     // 0.0625 F resolution, ~750ms convert
+static const char*    MDNS_HOSTNAME   = "pool-temp";
 
 // ---------- globals ----------
 OneWire oneWire(ONEWIRE_PIN);
 DallasTemperature sensors(&oneWire);
 uint8_t deviceCount = 0;
-DeviceAddress addrs[8];   // support up to 8 probes on the bus
+DeviceAddress addrs[8];
 
 // ---------- helpers ----------
 static String addrToHex(const DeviceAddress& a) {
@@ -65,6 +56,7 @@ static void connectWifi() {
     return;
   }
 
+  WiFi.setHostname(MDNS_HOSTNAME);
   Serial.printf("[wifi] connecting to %s...\n", ssid);
   WiFi.begin(ssid, pass);
   uint32_t start = millis();
@@ -78,6 +70,9 @@ static void connectWifi() {
                   WiFi.SSID().c_str(),
                   WiFi.localIP().toString().c_str(),
                   WiFi.RSSI());
+    g_telemetry.wifi_ssid = WiFi.SSID();
+    g_telemetry.wifi_ip   = WiFi.localIP().toString();
+    g_telemetry.wifi_rssi = WiFi.RSSI();
   } else {
     Serial.println("[wifi] connect timeout");
   }
@@ -102,56 +97,61 @@ static void discoverSensors() {
       deviceCount++;
     }
   }
+  g_telemetry.sensor_count = deviceCount;
   if (deviceCount == 0) {
-    Serial.println("[1wire] no sensors — check wiring (pull-up? GPIO13? GND/3V3?)");
+    Serial.println("[1wire] no sensors -- check wiring (pull-up? GPIO13? GND/3V3?)");
   }
 }
 
 // Try one endpoint. Returns true on 2xx.
-static bool tryPost(const char* url, const String& payload) {
+static bool tryPost(const String& url, const String& payload) {
+  if (url.length() == 0) return false;
   HTTPClient http;
   bool began;
   WiFiClientSecure secure;
-  if (strncmp(url, "https://", 8) == 0) {
-    // Skip cert validation -- low-stakes data, ngrok/origin will have a
-    // real cert anyway. Avoids shipping a CA bundle in firmware.
+  if (url.startsWith("https://")) {
     secure.setInsecure();
     began = http.begin(secure, url);
   } else {
     began = http.begin(url);
   }
   if (!began) {
-    Serial.printf("[http] begin failed for %s\n", url);
+    Serial.printf("[http] begin failed for %s\n", url.c_str());
     return false;
   }
-  http.setConnectTimeout(5000);   // 5s to establish TCP/TLS
-  http.setTimeout(8000);          // 8s for the response
+  http.setConnectTimeout(5000);
+  http.setTimeout(8000);
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-API-Key", API_KEY);
+  http.addHeader("X-API-Key", g_config.api_key);
   http.addHeader("ngrok-skip-browser-warning", "true");
   int code = http.POST(payload);
   String resp = http.getString();
-  Serial.printf("[http] %s -> %d  %s\n", url, code, resp.c_str());
+  Serial.printf("[http] %s -> %d  %s\n", url.c_str(), code, resp.c_str());
   http.end();
   return code >= 200 && code < 300;
 }
 
-// Try every endpoint in order; first 2xx wins. Logs failover transitions.
+// Try primary then fallback (config-driven). First 2xx wins. Empty URLs skipped.
 static void postReading(const String& payload) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[http] wifi down, skipping POST");
+    g_telemetry.posts_failed++;
     return;
   }
-  for (size_t i = 0; ENDPOINTS[i] != nullptr; i++) {
-    if (tryPost(ENDPOINTS[i], payload)) {
-      if (i > 0) Serial.printf("[http] succeeded on fallback endpoint #%u\n", (unsigned)i);
+  const String* urls[2] = { &g_config.endpoint_primary, &g_config.endpoint_fallback };
+  for (int i = 0; i < 2; i++) {
+    if (urls[i]->length() == 0) continue;
+    if (tryPost(*urls[i], payload)) {
+      if (i > 0) Serial.println("[http] succeeded on fallback");
+      g_telemetry.posts_ok++;
       return;
     }
-    if (ENDPOINTS[i + 1] != nullptr) {
-      Serial.printf("[http] failover -> next endpoint\n");
+    if (i + 1 < 2 && urls[i + 1]->length() > 0) {
+      Serial.println("[http] failover -> next endpoint");
     }
   }
   Serial.println("[http] all endpoints failed this cycle");
+  g_telemetry.posts_failed++;
 }
 
 // ---------- arduino ----------
@@ -160,23 +160,71 @@ void setup() {
   delay(200);
   Serial.println();
   Serial.println("=== pool-temp boot ===");
+
+  loadConfig(g_config);
+  Serial.printf("[cfg] primary=%s\n",  g_config.endpoint_primary.c_str());
+  Serial.printf("[cfg] fallback=%s\n", g_config.endpoint_fallback.c_str());
+  Serial.printf("[cfg] sample_ms=%lu  bounds=[%.1f, %.1f]  label=%s\n",
+                (unsigned long)g_config.sample_period_ms,
+                g_config.min_valid_f, g_config.max_valid_f,
+                g_config.device_label.c_str());
+
   discoverSensors();
   connectWifi();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    if (MDNS.begin(MDNS_HOSTNAME)) {
+      MDNS.addService("http", "tcp", 80);
+      Serial.printf("[mdns] http://%s.local/\n", MDNS_HOSTNAME);
+    } else {
+      Serial.println("[mdns] start failed");
+    }
+
+    ArduinoOTA.setHostname(MDNS_HOSTNAME);
+    ArduinoOTA.setPassword(g_config.ota_password.c_str());
+    ArduinoOTA.onStart([]() {
+      Serial.println("[ota] update starting");
+    });
+    ArduinoOTA.onEnd([]() {
+      Serial.println("\n[ota] update done");
+    });
+    ArduinoOTA.onProgress([](unsigned int p, unsigned int t) {
+      Serial.printf("[ota] %u%%\r", (p * 100) / t);
+    });
+    ArduinoOTA.onError([](ota_error_t e) {
+      Serial.printf("[ota] error %u\n", e);
+    });
+    ArduinoOTA.begin();
+    Serial.println("[ota] ready");
+
+    adminBegin();
+  }
 }
 
 void loop() {
+  // ArduinoOTA + admin server must be serviced every loop, not just when sampling.
+  ArduinoOTA.handle();
+  adminLoop();
+  g_telemetry.boot_seconds = millis() / 1000;
+
   static uint32_t lastSample = 0;
   uint32_t now = millis();
-  if (now - lastSample < SAMPLE_PERIOD && lastSample != 0) {
-    delay(100);
+  if (now - lastSample < g_config.sample_period_ms && lastSample != 0) {
+    delay(20);
     return;
   }
   lastSample = now;
 
   ensureWifi();
 
+  // Refresh wifi telemetry every cycle (RSSI in particular drifts).
+  if (WiFi.status() == WL_CONNECTED) {
+    g_telemetry.wifi_ssid = WiFi.SSID();
+    g_telemetry.wifi_ip   = WiFi.localIP().toString();
+    g_telemetry.wifi_rssi = WiFi.RSSI();
+  }
+
   if (deviceCount == 0) {
-    // re-scan in case probe was plugged in after boot
     discoverSensors();
     if (deviceCount == 0) return;
   }
@@ -185,18 +233,24 @@ void loop() {
 
   StaticJsonDocument<512> doc;
   JsonArray arr = doc.createNestedArray("sensors");
-  float primary = NAN;
+  float primary = NAN;          // first valid reading
+  float primaryByAddr = NAN;    // reading from the configured primary_addr (if any)
 
   for (uint8_t i = 0; i < deviceCount; i++) {
     float f = sensors.getTempF(addrs[i]);
-    bool valid = (f != DEVICE_DISCONNECTED_F) && (f >= MIN_VALID_F) && (f <= MAX_VALID_F);
-    Serial.printf("[temp] %s = %.2f F %s\n",
-                  addrToHex(addrs[i]).c_str(), f, valid ? "" : "(rejected)");
+    bool valid = (f != DEVICE_DISCONNECTED_F)
+              && (f >= g_config.min_valid_f)
+              && (f <= g_config.max_valid_f);
+    String hex = addrToHex(addrs[i]);
+    Serial.printf("[temp] %s = %.2f F %s\n", hex.c_str(), f, valid ? "" : "(rejected)");
     if (!valid) continue;
     JsonObject s = arr.createNestedObject();
-    s["addr"]   = addrToHex(addrs[i]);
+    s["addr"]   = hex;
     s["temp_f"] = f;
     if (isnan(primary)) primary = f;
+    if (g_config.primary_addr.length() > 0 && hex == g_config.primary_addr) {
+      primaryByAddr = f;
+    }
   }
 
   if (arr.size() == 0) {
@@ -204,8 +258,14 @@ void loop() {
     return;
   }
 
-  // Keep top-level temp_f for backward compat with the CLAUDE.md shape.
-  doc["temp_f"] = primary;
+  float topLevel = !isnan(primaryByAddr) ? primaryByAddr : primary;
+  doc["temp_f"] = topLevel;
+  if (g_config.device_label.length() > 0) {
+    doc["label"] = g_config.device_label;
+  }
+
+  g_telemetry.last_temp_f    = topLevel;
+  g_telemetry.last_sample_ms = millis();
 
   String payload;
   serializeJson(doc, payload);
