@@ -103,27 +103,43 @@ static void discoverSensors() {
   }
 }
 
+// ngrok and many CDNs want ALPN=http/1.1; ESP32 mbedtls otherwise sends a
+// blank ALPN list which some edges treat as a protocol mismatch and close
+// the connection mid-handshake (SSL_CONN_EOF / -29312).
+static const char* k_alpn_protos[] = {"http/1.1", nullptr};
+
 // Try one endpoint. Returns true on 2xx.
 static bool tryPost(const String& url, const String& payload) {
   if (url.length() == 0) return false;
+
   HTTPClient http;
-  bool began;
   WiFiClientSecure secure;
+  WiFiClient plain;
+  bool began;
+
   if (url.startsWith("https://")) {
     secure.setInsecure();
+    secure.setHandshakeTimeout(15);          // seconds; default 5s is tight for ESP32
+    secure.setAlpnProtocols(k_alpn_protos);  // tell ngrok we speak http/1.1
     began = http.begin(secure, url);
   } else {
-    began = http.begin(url);
+    began = http.begin(plain, url);
   }
+
   if (!began) {
     Serial.printf("[http] begin failed for %s\n", url.c_str());
     return false;
   }
-  http.setConnectTimeout(5000);
-  http.setTimeout(8000);
+  http.setConnectTimeout(10000);
+  http.setTimeout(15000);
+  // The club site currently 301s any unknown path to https://... -- follow it
+  // so we see the real status code (likely 404 until they implement), instead
+  // of treating the redirect itself as failure.
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-API-Key", g_config.api_key);
   http.addHeader("ngrok-skip-browser-warning", "true");
+
   int code = http.POST(payload);
   String resp = http.getString();
   Serial.printf("[http] %s -> %d  %s\n", url.c_str(), code, resp.c_str());
