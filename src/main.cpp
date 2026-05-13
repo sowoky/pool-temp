@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <HTTPUpdate.h>
 #include <ESPmDNS.h>
 #include <ArduinoOTA.h>
 #include <OneWire.h>
@@ -11,6 +12,10 @@
 #include "secrets.h"      // DEV_SSID / DEV_PASS / FALLBACK_SSID / FALLBACK_PASS
 #include "config.h"       // g_config / loadConfig / saveConfig
 #include "admin_page.h"   // adminBegin / adminLoop / g_telemetry
+
+// Bumped per release. Self-update only fires when the manifest advertises
+// a string different from this one.
+static const char* FW_VERSION = "1.1.0";
 
 // Hardware-fixed; not in NVS.
 static const uint8_t  ONEWIRE_PIN     = 13;
@@ -106,54 +111,15 @@ static void discoverSensors() {
 // ngrok and many CDNs want ALPN=http/1.1.
 static const char* k_alpn_protos[] = {"http/1.1", nullptr};
 
-// Let's Encrypt root. ngrok serves LE certs so this validates the chain.
-// (Newer LE chain crosses through ISRG Root X1 for RSA, ISRG Root X2 for
-// ECDSA. X1 is enough -- ngrok's free edges use X1 chains currently.)
-static const char ISRG_ROOT_X1_PEM[] PROGMEM = R"PEM(-----BEGIN CERTIFICATE-----
-MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
-TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
-cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
-WhcNMzUwNjA0MTEwNDM4WjBPMQswCQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJu
-ZXQgU2VjdXJpdHkgUmVzZWFyY2ggR3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBY
-MTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAK3oJHP0FDfzm54rVygc
-h77ct984kIxuPOZXoHj3dcKi/vVqbvYATyjb3miGbESTtrFj/RQSa78f0uoxmyF+
-0TM8ukj13Xnfs7j/EvEhmkvBioZxaUpmZmyPfjxwv60pIgbz5MDmgK7iS4+3mX6U
-A5/TR5d8mUgjU+g4rk8Kb4Mu0UlXjIB0ttov0DiNewNwIRt18jA8+o+u3dpjq+sW
-T8KOEUt+zwvo/7V3LvSye0rgTBIlDHCNAymg4VMk7BPZ7hm/ELNKjD+Jo2FR3qyH
-B5T0Y3HsLuJvW5iB4YlcNHlsdu87kGJ55tukmi8mxdAQ4Q7e2RCOFvu396j3x+UC
-B5iPNgiV5+I3lg02dZ77DnKxHZu8A/lJBdiB3QW0KtZB6awBdpUKD9jf1b0SHzUv
-KBds0pjBqAlkd25HN7rOrFleaJ1/ctaJxQZBKT5ZPt0m9STJEadao0xAH0ahmbWn
-OlFuhjuefXKnEgV4We0+UXgVCwOPjdAvBbI+e0ocS3MFEvzG6uBQE3xDk3SzynTn
-jh8BCNAw1FtxNrQHusEwMFxIt4I7mKZ9YIqioymCzLq9gwQbooMDQaHWBfEbwrbw
-qHyGO0aoSCqI3Haadr8faqU9GY/rOPNk3sgrDQoo//fb4hVC1CLQJ13hef4Y53CI
-rU7m2Ys6xt0nUW7/vGT1M0NPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNV
-HRMBAf8EBTADAQH/MB0GA1UdDgQWBBR5tFnme7bl5AFzgAiIyBpY9umbbjANBgkq
-hkiG9w0BAQsFAAOCAgEAVR9YqbyyqFDQDLHYGmkgJykIrGF1XIpu+ILlaS/V9lZL
-ubhzEFnTIZd+50xx+7LSYK05qAvqFyFWhfFQDlnrzuBZ6brJFe+GnY+EgPbk6ZGQ
-3BebYhtF8GaV0nxvwuo77x/Py9auJ/GpsMiu/X1+mvoiBOv/2X/qkSsisRcOj/KK
-NFtY2PwByVS5uCbMiogziUwthDyC3+6WVwW6LLv3xLfHTjuCvjHIInNzktHCgKQ5
-ORAzI4JMPJ+GslWYHb4phowim57iaztXOoJwTdwJx4nLCgdNbOhdjsnvzqvHu7Ur
-TkXWStAmzOVyyghqpZXjFaH3pO3JLF+l+/+sKAIuvtd7u+Nxe5AW0wdeRlN8NwdC
-jNPElpzVmbUq4JUagEiuTDkHzsxHpFKVK7q4+63SM1N95R1NbdWhscdCb+ZAJzVc
-oyi3B43njTOQ5yOf+1CceWxG1bQVs5ZufpsMljq4Ui0/1lvh+wjChP4kqKOJ2qxq
-4RgqsahDYVvTH9w7jXbyLeiNdd8XM2w9U/t7y0Ff/9yi0GE44Za4rF2LN9d11TPA
-mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
-emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
------END CERTIFICATE-----
-)PEM";
-
-// Persistent across requests so we don't churn heap each cycle. The TLS
-// context inside lives for the duration of one request and gets reset
-// by stop() between calls.
+// Persistent across requests so we don't churn heap each cycle.
 static WiFiClientSecure g_secureClient;
 static bool g_secureClientReady = false;
 
 static void ensureSecureClient() {
   if (g_secureClientReady) return;
-  // Skip chain validation. TLS still encrypts in flight; X-API-Key is the
-  // real auth. This lets us POST to any HTTPS endpoint without having to
-  // bundle every CA root anyone's cert might chain through (the club site
-  // is on Google Trust Services, the ngrok/Caddy fallbacks are LE, etc.).
+  // Skip chain validation -- bytes are still TLS-encrypted, X-API-Key is
+  // the real auth, and this lets us POST to any HTTPS endpoint regardless
+  // of which CA issued its cert.
   g_secureClient.setInsecure();
   g_secureClient.setHandshakeTimeout(30);
   g_secureClient.setAlpnProtocols(k_alpn_protos);
@@ -170,7 +136,7 @@ static bool tryPost(const String& url, const String& payload) {
 
   if (url.startsWith("https://")) {
     ensureSecureClient();
-    g_secureClient.stop();   // reset any prior connection state
+    g_secureClient.stop();
     began = http.begin(g_secureClient, url);
   } else {
     began = http.begin(plain, url);
@@ -182,10 +148,7 @@ static bool tryPost(const String& url, const String& payload) {
   }
   http.setConnectTimeout(10000);
   http.setTimeout(15000);
-  // The club site currently 301s any unknown path to https://... -- follow it
-  // so we see the real status code (likely 404 until they implement), instead
-  // of treating the redirect itself as failure.
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-API-Key", g_config.api_key);
   http.addHeader("ngrok-skip-browser-warning", "true");
@@ -197,27 +160,117 @@ static bool tryPost(const String& url, const String& payload) {
   return code >= 200 && code < 300;
 }
 
-// Try primary then fallback (config-driven). First 2xx wins. Empty URLs skipped.
+// POST every cycle to both configured endpoints, independently. Each gets
+// its own counter; failure of one does not stop the other.
 static void postReading(const String& payload) {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[http] wifi down, skipping POST");
-    g_telemetry.posts_failed++;
+    Serial.println("[http] wifi down, skipping POSTs");
+    g_telemetry.posts_ep1_failed++;
+    g_telemetry.posts_ep2_failed++;
     return;
   }
-  const String* urls[2] = { &g_config.endpoint_primary, &g_config.endpoint_fallback };
-  for (int i = 0; i < 2; i++) {
-    if (urls[i]->length() == 0) continue;
-    if (tryPost(*urls[i], payload)) {
-      if (i > 0) Serial.println("[http] succeeded on fallback");
-      g_telemetry.posts_ok++;
-      return;
-    }
-    if (i + 1 < 2 && urls[i + 1]->length() > 0) {
-      Serial.println("[http] failover -> next endpoint");
-    }
+
+  if (g_config.endpoint_1.length() > 0) {
+    if (tryPost(g_config.endpoint_1, payload)) g_telemetry.posts_ep1_ok++;
+    else                                       g_telemetry.posts_ep1_failed++;
   }
-  Serial.println("[http] all endpoints failed this cycle");
-  g_telemetry.posts_failed++;
+  if (g_config.endpoint_2.length() > 0) {
+    if (tryPost(g_config.endpoint_2, payload)) g_telemetry.posts_ep2_ok++;
+    else                                       g_telemetry.posts_ep2_failed++;
+  }
+}
+
+// Periodic self-update over HTTPS. Fetches the manifest, compares its
+// "version" field to FW_VERSION; if different, downloads the binary URL
+// it advertises and applies it via the Update library (reboots on success).
+static void checkForUpdate() {
+  if (!g_config.auto_update_enabled) return;
+  if (WiFi.status() != WL_CONNECTED)  return;
+  if (g_config.update_manifest_url.length() == 0) return;
+
+  g_telemetry.last_update_check_ms = millis();
+
+  ensureSecureClient();
+  g_secureClient.stop();
+
+  HTTPClient http;
+  WiFiClient plain;
+  bool began;
+  if (g_config.update_manifest_url.startsWith("https://")) {
+    began = http.begin(g_secureClient, g_config.update_manifest_url);
+  } else {
+    began = http.begin(plain, g_config.update_manifest_url);
+  }
+  if (!began) {
+    g_telemetry.last_update_result = "begin failed";
+    Serial.println("[update] begin failed");
+    return;
+  }
+  http.setConnectTimeout(10000);
+  http.setTimeout(15000);
+  int code = http.GET();
+  if (code != 200) {
+    String result = "manifest HTTP " + String(code);
+    g_telemetry.last_update_result = result;
+    Serial.printf("[update] %s\n", result.c_str());
+    http.end();
+    return;
+  }
+  String body = http.getString();
+  http.end();
+
+  StaticJsonDocument<512> doc;
+  if (deserializeJson(doc, body)) {
+    g_telemetry.last_update_result = "manifest parse error";
+    Serial.println("[update] manifest parse error");
+    return;
+  }
+
+  const char* manifest_version = doc["version"]   | "";
+  const char* binary_url       = doc["url"]       | "";
+  if (manifest_version[0] == 0 || binary_url[0] == 0) {
+    g_telemetry.last_update_result = "manifest missing fields";
+    Serial.println("[update] manifest missing version or url");
+    return;
+  }
+
+  Serial.printf("[update] manifest version=%s url=%s\n", manifest_version, binary_url);
+  if (strcmp(manifest_version, FW_VERSION) == 0) {
+    g_telemetry.last_update_result = String("up to date (") + FW_VERSION + ")";
+    return;
+  }
+
+  Serial.printf("[update] applying %s -> %s\n", FW_VERSION, manifest_version);
+  g_telemetry.last_update_result = String("downloading ") + manifest_version;
+
+  // HTTPUpdate handles streaming the binary into the Update flash region,
+  // verifying it, switching the OTA partition, and rebooting on success.
+  ensureSecureClient();
+  g_secureClient.stop();
+  httpUpdate.rebootOnUpdate(true);
+  t_httpUpdate_return ret;
+  if (String(binary_url).startsWith("https://")) {
+    ret = httpUpdate.update(g_secureClient, binary_url);
+  } else {
+    WiFiClient plain2;
+    ret = httpUpdate.update(plain2, binary_url);
+  }
+
+  switch (ret) {
+    case HTTP_UPDATE_FAILED:
+      g_telemetry.last_update_result = String("FAILED: ") + httpUpdate.getLastErrorString();
+      Serial.printf("[update] FAILED: %s\n", httpUpdate.getLastErrorString().c_str());
+      break;
+    case HTTP_UPDATE_NO_UPDATES:
+      g_telemetry.last_update_result = "no update";
+      Serial.println("[update] no update");
+      break;
+    case HTTP_UPDATE_OK:
+      // Shouldn't reach here -- rebootOnUpdate fires before this.
+      g_telemetry.last_update_result = "OK (rebooting)";
+      Serial.println("[update] OK, rebooting");
+      break;
+  }
 }
 
 // ---------- arduino ----------
@@ -225,15 +278,21 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println();
-  Serial.println("=== pool-temp boot ===");
+  Serial.printf("=== pool-temp boot (fw %s) ===\n", FW_VERSION);
 
   loadConfig(g_config);
-  Serial.printf("[cfg] primary=%s\n",  g_config.endpoint_primary.c_str());
-  Serial.printf("[cfg] fallback=%s\n", g_config.endpoint_fallback.c_str());
+  Serial.printf("[cfg] endpoint_1=%s\n", g_config.endpoint_1.c_str());
+  Serial.printf("[cfg] endpoint_2=%s\n", g_config.endpoint_2.c_str());
   Serial.printf("[cfg] sample_ms=%lu  bounds=[%.1f, %.1f]  label=%s\n",
                 (unsigned long)g_config.sample_period_ms,
                 g_config.min_valid_f, g_config.max_valid_f,
                 g_config.device_label.c_str());
+  Serial.printf("[cfg] auto_update=%s  url=%s  period=%lu min\n",
+                g_config.auto_update_enabled ? "on" : "off",
+                g_config.update_manifest_url.c_str(),
+                (unsigned long)(g_config.update_check_period_ms / 60000));
+
+  g_telemetry.fw_version = FW_VERSION;
 
   discoverSensors();
   connectWifi();
@@ -248,12 +307,8 @@ void setup() {
 
     ArduinoOTA.setHostname(MDNS_HOSTNAME);
     ArduinoOTA.setPassword(g_config.ota_password.c_str());
-    ArduinoOTA.onStart([]() {
-      Serial.println("[ota] update starting");
-    });
-    ArduinoOTA.onEnd([]() {
-      Serial.println("\n[ota] update done");
-    });
+    ArduinoOTA.onStart  ([]() { Serial.println("[ota] update starting"); });
+    ArduinoOTA.onEnd    ([]() { Serial.println("\n[ota] update done"); });
     ArduinoOTA.onProgress([](unsigned int p, unsigned int t) {
       Serial.printf("[ota] %u%%\r", (p * 100) / t);
     });
@@ -268,13 +323,24 @@ void setup() {
 }
 
 void loop() {
-  // ArduinoOTA + admin server must be serviced every loop, not just when sampling.
   ArduinoOTA.handle();
   adminLoop();
   g_telemetry.boot_seconds = millis() / 1000;
 
-  static uint32_t lastSample = 0;
+  // Auto-update tick. Fire 30 seconds after boot (settling) and then on
+  // the configured interval. Cheap when nothing's new.
+  static uint32_t lastUpdateCheck = 0;
   uint32_t now = millis();
+  if (g_config.auto_update_enabled &&
+      WiFi.status() == WL_CONNECTED &&
+      ((lastUpdateCheck == 0 && now > 30000) ||
+       (lastUpdateCheck != 0 && now - lastUpdateCheck >= g_config.update_check_period_ms))) {
+    lastUpdateCheck = now;
+    checkForUpdate();
+  }
+
+  // Sample tick.
+  static uint32_t lastSample = 0;
   if (now - lastSample < g_config.sample_period_ms && lastSample != 0) {
     delay(20);
     return;
@@ -283,7 +349,6 @@ void loop() {
 
   ensureWifi();
 
-  // Refresh wifi telemetry every cycle (RSSI in particular drifts).
   if (WiFi.status() == WL_CONNECTED) {
     g_telemetry.wifi_ssid = WiFi.SSID();
     g_telemetry.wifi_ip   = WiFi.localIP().toString();
@@ -299,8 +364,8 @@ void loop() {
 
   StaticJsonDocument<512> doc;
   JsonArray arr = doc.createNestedArray("sensors");
-  float primary = NAN;          // first valid reading
-  float primaryByAddr = NAN;    // reading from the configured primary_addr (if any)
+  float primary = NAN;
+  float primaryByAddr = NAN;
 
   for (uint8_t i = 0; i < deviceCount; i++) {
     float f = sensors.getTempF(addrs[i]);
@@ -325,7 +390,8 @@ void loop() {
   }
 
   float topLevel = !isnan(primaryByAddr) ? primaryByAddr : primary;
-  doc["temp_f"] = topLevel;
+  doc["temp_f"]  = topLevel;
+  doc["fw"]      = FW_VERSION;
   if (g_config.device_label.length() > 0) {
     doc["label"] = g_config.device_label;
   }

@@ -76,27 +76,49 @@ button:hover { filter: brightness(1.05); }
   if (saved) html += "<div class=\"saved\">Saved.</div>\n";
 
   html += "<section class=\"status\"><h2>Status</h2><table>";
+  html += "<tr><td>Firmware</td><td>" + esc(g_telemetry.fw_version) + "</td></tr>";
   html += "<tr><td>WiFi</td><td>" + esc(g_telemetry.wifi_ssid) + " &middot; " + esc(g_telemetry.wifi_ip)
         + " &middot; " + String(g_telemetry.wifi_rssi) + " dBm</td></tr>";
   html += "<tr><td>Uptime</td><td>" + String(g_telemetry.boot_seconds) + " s</td></tr>";
   html += "<tr><td>Sensors found</td><td>" + String(g_telemetry.sensor_count) + "</td></tr>";
   html += "<tr><td>Last temp</td><td>" + String(g_telemetry.last_temp_f, 2) + " &deg;F &middot; "
         + String((millis() - g_telemetry.last_sample_ms) / 1000) + " s ago</td></tr>";
-  html += "<tr><td>POSTs OK / failed</td><td>" + String(g_telemetry.posts_ok) + " / "
-        + String(g_telemetry.posts_failed) + "</td></tr>";
+  html += "<tr><td>Endpoint 1 (ok/fail)</td><td>" + String(g_telemetry.posts_ep1_ok) + " / "
+        + String(g_telemetry.posts_ep1_failed) + "</td></tr>";
+  html += "<tr><td>Endpoint 2 (ok/fail)</td><td>" + String(g_telemetry.posts_ep2_ok) + " / "
+        + String(g_telemetry.posts_ep2_failed) + "</td></tr>";
+  html += "<tr><td>Auto-update</td><td>";
+  if (g_telemetry.last_update_check_ms == 0) {
+    html += "never checked yet";
+  } else {
+    html += String((millis() - g_telemetry.last_update_check_ms) / 1000) + " s ago &middot; "
+          + esc(g_telemetry.last_update_result);
+  }
+  html += "</td></tr>";
   html += "</table></section>";
 
   html += "<form method=\"post\" action=\"/save\">";
 
   html += "<section><h2>Endpoints</h2>";
-  html += "<div class=\"row\"><label>Primary URL<span class=\"hint\">tried first; 2xx = success</span></label>"
-          "<input name=\"endpoint_primary\" value=\"" + esc(g_config.endpoint_primary) + "\"></div>";
-  html += "<div class=\"row\"><label>Fallback URL<span class=\"hint\">tried if primary fails; blank to skip</span></label>"
-          "<input name=\"endpoint_fallback\" value=\"" + esc(g_config.endpoint_fallback) + "\"></div>";
+  html += "<div class=\"row\"><label>Endpoint 1 URL<span class=\"hint\">posted to every cycle; failures don't affect endpoint 2</span></label>"
+          "<input name=\"endpoint_1\" value=\"" + esc(g_config.endpoint_1) + "\"></div>";
+  html += "<div class=\"row\"><label>Endpoint 2 URL<span class=\"hint\">also posted to every cycle; blank to skip</span></label>"
+          "<input name=\"endpoint_2\" value=\"" + esc(g_config.endpoint_2) + "\"></div>";
   html += "<div class=\"row\"><label>API key<span class=\"hint\">sent as X-API-Key</span></label>"
           "<input name=\"api_key\" value=\"" + esc(g_config.api_key) + "\"></div>";
   html += "<div class=\"row\"><label>Device label<span class=\"hint\">tag included in payload</span></label>"
           "<input name=\"device_label\" value=\"" + esc(g_config.device_label) + "\"></div>";
+  html += "</section>";
+
+  html += "<section><h2>Auto-update</h2>";
+  html += "<div class=\"row\"><label>Enabled<span class=\"hint\">poll for new firmware on the interval below</span></label>"
+          "<input type=\"checkbox\" name=\"au_enabled\" value=\"1\""
+        + String(g_config.auto_update_enabled ? " checked" : "") + "></div>";
+  html += "<div class=\"row\"><label>Manifest URL<span class=\"hint\">JSON describing the latest firmware</span></label>"
+          "<input name=\"au_url\" value=\"" + esc(g_config.update_manifest_url) + "\"></div>";
+  html += "<div class=\"row\"><label>Check interval (minutes)<span class=\"hint\">how often to poll the manifest</span></label>"
+          "<input type=\"number\" min=\"5\" name=\"au_minutes\" value=\""
+        + String(g_config.update_check_period_ms / 60000) + "\"></div>";
   html += "</section>";
 
   html += "<section><h2>Sampling</h2>";
@@ -142,21 +164,31 @@ static void handleRoot() {
 
 static void handleSave() {
   if (!requireAuth()) return;
-  if (server.hasArg("endpoint_primary"))  g_config.endpoint_primary  = server.arg("endpoint_primary");
-  if (server.hasArg("endpoint_fallback")) g_config.endpoint_fallback = server.arg("endpoint_fallback");
-  if (server.hasArg("api_key"))           g_config.api_key           = server.arg("api_key");
-  if (server.hasArg("device_label"))      g_config.device_label      = server.arg("device_label");
+  if (server.hasArg("endpoint_1"))     g_config.endpoint_1   = server.arg("endpoint_1");
+  if (server.hasArg("endpoint_2"))     g_config.endpoint_2   = server.arg("endpoint_2");
+  if (server.hasArg("api_key"))        g_config.api_key      = server.arg("api_key");
+  if (server.hasArg("device_label"))   g_config.device_label = server.arg("device_label");
   if (server.hasArg("sample_seconds")) {
     uint32_t s = server.arg("sample_seconds").toInt();
     if (s < 5) s = 5;
     g_config.sample_period_ms = s * 1000UL;
   }
-  if (server.hasArg("min_f"))             g_config.min_valid_f       = server.arg("min_f").toFloat();
-  if (server.hasArg("max_f"))             g_config.max_valid_f       = server.arg("max_f").toFloat();
-  if (server.hasArg("primary_addr"))      g_config.primary_addr      = server.arg("primary_addr");
-  if (server.hasArg("admin_user"))        g_config.admin_user        = server.arg("admin_user");
-  if (server.hasArg("admin_pass"))        g_config.admin_pass        = server.arg("admin_pass");
-  if (server.hasArg("ota_password"))      g_config.ota_password      = server.arg("ota_password");
+  if (server.hasArg("min_f"))          g_config.min_valid_f  = server.arg("min_f").toFloat();
+  if (server.hasArg("max_f"))          g_config.max_valid_f  = server.arg("max_f").toFloat();
+  if (server.hasArg("primary_addr"))   g_config.primary_addr = server.arg("primary_addr");
+  if (server.hasArg("admin_user"))     g_config.admin_user   = server.arg("admin_user");
+  if (server.hasArg("admin_pass"))     g_config.admin_pass   = server.arg("admin_pass");
+  if (server.hasArg("ota_password"))   g_config.ota_password = server.arg("ota_password");
+
+  // Checkbox: only present in the POST body when checked.
+  g_config.auto_update_enabled = server.hasArg("au_enabled");
+  if (server.hasArg("au_url"))         g_config.update_manifest_url = server.arg("au_url");
+  if (server.hasArg("au_minutes")) {
+    uint32_t m = server.arg("au_minutes").toInt();
+    if (m < 5) m = 5;
+    g_config.update_check_period_ms = m * 60000UL;
+  }
+
   saveConfig(g_config);
   Serial.println("[admin] config saved");
   server.sendHeader("Location", "/?saved=1");
@@ -165,12 +197,18 @@ static void handleSave() {
 
 static void handleStatus() {
   String j = "{";
+  j += "\"fw_version\":\""       + g_telemetry.fw_version + "\",";
   j += "\"uptime_s\":"           + String(g_telemetry.boot_seconds) + ",";
   j += "\"sensors\":"            + String(g_telemetry.sensor_count) + ",";
   j += "\"last_temp_f\":"        + String(g_telemetry.last_temp_f, 2) + ",";
   j += "\"last_sample_age_s\":"  + String((millis() - g_telemetry.last_sample_ms) / 1000) + ",";
-  j += "\"posts_ok\":"           + String(g_telemetry.posts_ok) + ",";
-  j += "\"posts_failed\":"       + String(g_telemetry.posts_failed) + ",";
+  j += "\"posts_ep1_ok\":"       + String(g_telemetry.posts_ep1_ok) + ",";
+  j += "\"posts_ep1_failed\":"   + String(g_telemetry.posts_ep1_failed) + ",";
+  j += "\"posts_ep2_ok\":"       + String(g_telemetry.posts_ep2_ok) + ",";
+  j += "\"posts_ep2_failed\":"   + String(g_telemetry.posts_ep2_failed) + ",";
+  j += "\"last_update_age_s\":"  + String(g_telemetry.last_update_check_ms == 0 ? -1 :
+                                          (int)((millis() - g_telemetry.last_update_check_ms) / 1000)) + ",";
+  j += "\"last_update_result\":\"" + g_telemetry.last_update_result + "\",";
   j += "\"wifi_ssid\":\""        + g_telemetry.wifi_ssid + "\",";
   j += "\"wifi_ip\":\""          + g_telemetry.wifi_ip + "\",";
   j += "\"wifi_rssi\":"          + String(g_telemetry.wifi_rssi);

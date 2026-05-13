@@ -3,5 +3,8 @@
     "allow": [
       "Skill(update-config)"
     ]
+  },
+  "remote": {
+    "defaultEnvironmentId": "env_01245nQafis4f6DuF7tYKw8S"
   }
 }

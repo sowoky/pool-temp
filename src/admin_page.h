@@ -17,10 +17,20 @@ struct AdminTelemetry {
   uint8_t  sensor_count;
   float    last_temp_f;
   uint32_t last_sample_ms;
-  uint32_t posts_ok;
-  uint32_t posts_failed;
+
+  // Per-endpoint counters since boot. Both URLs are tried every cycle now.
+  uint32_t posts_ep1_ok;
+  uint32_t posts_ep1_failed;
+  uint32_t posts_ep2_ok;
+  uint32_t posts_ep2_failed;
+
+  // Self-update
+  uint32_t last_update_check_ms;
+  String   last_update_result;
+
   String   wifi_ssid;
   String   wifi_ip;
   int      wifi_rssi;
+  String   fw_version;
 };
 extern AdminTelemetry g_telemetry;

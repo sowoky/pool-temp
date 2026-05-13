@@ -1,0 +1,7 @@
+{
+  "version": "1.1.0",
+  "url": "https://temp.kyro-labs.com/static/firmware/firmware-1.1.0.bin",
+  "size_bytes": 1039888,
+  "released_at": "2026-05-13T22:03:47Z",
+  "notes": "Dual-endpoint POST + self-update via HTTPUpdate (auto-update polls latest.json hourly)"
+}
