@@ -150,7 +150,11 @@ static bool g_secureClientReady = false;
 
 static void ensureSecureClient() {
   if (g_secureClientReady) return;
-  g_secureClient.setCACert(ISRG_ROOT_X1_PEM);
+  // Skip chain validation. TLS still encrypts in flight; X-API-Key is the
+  // real auth. This lets us POST to any HTTPS endpoint without having to
+  // bundle every CA root anyone's cert might chain through (the club site
+  // is on Google Trust Services, the ngrok/Caddy fallbacks are LE, etc.).
+  g_secureClient.setInsecure();
   g_secureClient.setHandshakeTimeout(30);
   g_secureClient.setAlpnProtocols(k_alpn_protos);
   g_secureClientReady = true;
