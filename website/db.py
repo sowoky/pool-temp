@@ -37,6 +37,19 @@ CREATE TABLE IF NOT EXISTS outdoor_readings (
 CREATE INDEX IF NOT EXISTS idx_pool_readings_ts    ON pool_readings(ts);
 CREATE INDEX IF NOT EXISTS idx_outdoor_readings_ts ON outdoor_readings(ts);
 CREATE INDEX IF NOT EXISTS idx_sensor_reading_id   ON pool_sensor_readings(reading_id);
+
+CREATE TABLE IF NOT EXISTS hourly_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts            TEXT    NOT NULL,
+    water_f       REAL,
+    water_age_s   INTEGER,
+    water_source  TEXT,
+    air_550_f     REAL,
+    air_264_f     REAL,
+    error         TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_hourly_log_ts ON hourly_log(ts);
 """
 
 
@@ -137,4 +150,34 @@ def range_to_since(range_key: str) -> datetime:
         "24h": now - timedelta(hours=24),
         "7d":  now - timedelta(days=7),
         "30d": now - timedelta(days=30),
+        "1y":  now - timedelta(days=365),
+        "all": datetime(1970, 1, 1, tzinfo=timezone.utc),
     }.get(range_key, now - timedelta(hours=24))
+
+
+def insert_hourly_log(
+    water_f: float | None,
+    water_age_s: int | None,
+    water_source: str | None,
+    air_550_f: float | None,
+    air_264_f: float | None,
+    error: str | None,
+) -> None:
+    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with connect() as c:
+        c.execute(
+            "INSERT INTO hourly_log (ts, water_f, water_age_s, water_source, air_550_f, air_264_f, error) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (ts, water_f, water_age_s, water_source, air_550_f, air_264_f, error),
+        )
+
+
+def hourly_log(since: datetime) -> list[dict]:
+    cutoff = since.astimezone(timezone.utc).isoformat(timespec="seconds")
+    with connect() as c:
+        rows = c.execute(
+            "SELECT ts, water_f, water_age_s, water_source, air_550_f, air_264_f, error "
+            "FROM hourly_log WHERE ts >= ? ORDER BY ts ASC",
+            (cutoff,),
+        ).fetchall()
+    return [dict(r) for r in rows]

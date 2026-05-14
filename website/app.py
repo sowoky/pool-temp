@@ -51,8 +51,46 @@ def _start_weather_thread():
     t.start()
 
 
-# kick off background poller; daemon so it dies with the process
+def _hourly_loop():
+    """Once an hour, snapshot (club water temp, KALHUNTS560 air, KALHUNTS264
+    air) into the hourly_log table. Decoupled from the firmware's own
+    POSTs so we have history even if our /reading ingestion is wrong/down."""
+    # First tick after 60s to give the rest of the app time to settle.
+    time.sleep(60)
+    while True:
+        err = None
+        water_f = water_age = None
+        air_550 = air_264 = None
+        try:
+            water_f, water_age = weather.fetch_club_pool_temp()
+            air_550 = weather.fetch_pws_single("KALHUNTS560")
+            air_264 = weather.fetch_pws_single("KALHUNTS264")
+        except Exception as e:
+            err = str(e)
+        try:
+            db.insert_hourly_log(
+                water_f=water_f,
+                water_age_s=water_age,
+                water_source="montesanoclub.org/pool",
+                air_550_f=air_550,
+                air_264_f=air_264,
+                error=err,
+            )
+            print(f"[hourly] water={water_f}F (age={water_age}s) "
+                  f"air_550={air_550}F air_264={air_264}F err={err}")
+        except Exception as e:
+            print(f"[hourly] db insert failed: {e}")
+        time.sleep(3600)
+
+
+def _start_hourly_thread():
+    t = threading.Thread(target=_hourly_loop, daemon=True, name="hourly-log")
+    t.start()
+
+
+# kick off background pollers; daemons so they die with the process
 _start_weather_thread()
+_start_hourly_thread()
 
 
 # ---------------------------------------------------------------- helpers
@@ -102,6 +140,16 @@ def api_history():
         "range":   range_key,
         "pool":    db.pool_history(since),
         "outdoor": db.outdoor_history(since),
+    })
+
+
+@app.route("/api/hourly")
+def api_hourly():
+    range_key = request.args.get("range", "7d")
+    since = db.range_to_since(range_key)
+    return jsonify({
+        "range":   range_key,
+        "rows":    db.hourly_log(since),
     })
 
 
