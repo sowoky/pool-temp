@@ -63,7 +63,7 @@ Probe is strap-mounted to PVC on the return line *after* the filter (active flow
 - Auto-reconnects on WiFi drop
 - Bounds-checks reading (0–130°F) before POSTing; rejects `DEVICE_DISCONNECTED_F`
 - POSTs JSON `{"sensors":[...], "temp_f":78.4}` with `X-API-Key` header to the configured primary URL; falls over to a fallback URL on non-2xx
-- HTTPS endpoints are validated against the pinned Let's Encrypt ISRG Root X1 (not `setInsecure()`)
+- HTTPS endpoints use `setInsecure()` — TLS still encrypts the bytes on the wire, `X-API-Key` is the real auth, and this lets the firmware POST to any HTTPS receiver regardless of CA without us having to manage a root store on a small box
 - ArduinoOTA over WiFi for firmware updates without unscrewing the enclosure
 - mDNS `pool-temp.local` for LAN discovery
 - Tiny admin web server on port 80 of the device — basic-auth form for editing the endpoint URLs, API key, sample period, label, OTA password (see `src/admin_page.cpp`)

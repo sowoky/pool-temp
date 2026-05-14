@@ -87,10 +87,12 @@ address.
 `dev-key`, rotatable via the device admin page (basic auth) or
 `tools\update-endpoints.py`.
 
-**HTTPS:** when the configured URL is `https://`, the firmware validates
-against the pinned Let's Encrypt ISRG Root X1 (in `src/main.cpp`) rather
-than disabling cert checks. ALPN is set to `http/1.1` so CDNs / ngrok edges
-that require it don't drop the handshake.
+**HTTPS:** when the configured URL is `https://`, the firmware uses
+`WiFiClientSecure::setInsecure()` — TLS still encrypts the bytes, but
+the cert chain isn't validated. `X-API-Key` is the real authentication.
+This keeps the firmware compatible with whatever CA the receiver chooses
+without us having to maintain a root store on the ESP32. ALPN is set to
+`http/1.1` so CDNs / ngrok edges that require it don't drop the handshake.
 
 **Runtime config (NVS, see `src/config.cpp`):**
 
