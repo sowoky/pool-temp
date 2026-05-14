@@ -28,6 +28,7 @@ website/fix-port80.log
 website/fix-port80-winnat.log
 website/kick-caddy.log
 website/stop-caddy.log
+website/disable-services.log
 test-server/server.log
 test-server/server.err.log
 

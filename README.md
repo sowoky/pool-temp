@@ -1,17 +1,21 @@
 # Pool Temperature Monitor
 
-A WiFi-connected pool thermometer for a neighborhood pool. An ESP32 reads a
-DS18B20 waterproof probe strapped to the filter return line and POSTs JSON
-readings to a small Flask website every minute. The website displays the
-current pool temperature alongside an outdoor air temperature from a nearby
-Wunderground PWS, with a historical chart over 24 hours, 7 days, or 30 days.
+WiFi-connected pool thermometer for a neighborhood pool. An ESP32 reads
+one or more DS18B20 waterproof probes strapped to the filter-return line
+and POSTs JSON readings every ~60 seconds to an external HTTP receiver.
+
+> **Scope:** this repo is now **firmware-only**. The `website/` and
+> `test-server/` subdirectories are orphaned reference code from earlier
+> bring-up; they're no longer part of the project. The Caddy reverse
+> proxy that fronted the local receiver has been removed. See
+> `tools\disable-services.ps1` for the one-shot cleanup that stops and
+> disables the `PoolTempCaddy` service on Windows.
 
 ## Hardware
 
-- **MCU**: ESP32 dev board, WROOM-32 variant (PlatformIO `esp32dev`)
+- **MCU**: ESP32 dev board, WROOM-32D variant (PlatformIO `esp32dev`), CH9102 USB-serial
 - **Sensor**: Waterproof DS18B20 probe (1-Wire, stainless sheath)
-- **Pull-up**: 4.7 k&Omega; from data to 3.3 V (often baked into the probe pigtail
-  &mdash; check with a meter before adding)
+- **Pull-up**: 4.7 kΩ from data to 3.3 V (often baked into the probe pigtail — meter before adding)
 - **Power**: USB at the pool equipment pad
 - **Enclosure**: IP65 with a cable gland
 
@@ -35,38 +39,34 @@ real pool temp, not stagnant pipe temp).
 1. Thermal paste between probe tip and pipe.
 2. Foil / HVAC aluminum tape pressing the probe against the pipe.
 3. Black foam pipe insulation sleeve over the whole assembly.
-4. Expect a 1&ndash;2&deg;F lag versus true water temperature &mdash; fine for
-   &ldquo;is the pool warm yet?&rdquo; purposes.
+4. Expect a 1–2 °F lag versus true water temperature — fine for
+   "is the pool warm yet?" purposes.
 
 The reading drifts toward ambient when the pump is off (water in the pipe
 stagnates).
 
-## Software architecture
+## Software
 
 ```
-                                +-----------------------------+
-   DS18B20 ---OneWire--- ESP32  | Flask web app (Windows host)|
-                          |     |  POST /reading              |
-                          |     |  GET  /, /temperature       |  <--- browsers
-                  HTTP POST     |  GET  /api/current          |
-                  JSON every    |  GET  /api/history          |
-                  60 seconds -> |  background outdoor poller  |
-                                +-----------------------------+
-                                              |
-                                          SQLite
-                                       website/data.db
+                                    +-----------------------+
+   DS18B20 ---OneWire--- ESP32 ---> | external HTTP receiver |
+                                    |  POST <url>           |
+                                    |  X-API-Key: <key>     |
+                                    +-----------------------+
+                                       ^
+                            JSON every 60s; falls over
+                            to a secondary URL on non-2xx
 ```
 
 ### Firmware: `src/main.cpp`
 
 Reads up to 8 DS18B20 sensors on the bus, scans for one of two known WiFi
-networks at boot (a home / dev SSID and the pool&rsquo;s public SSID), POSTs
+networks at boot (a home / dev SSID and the pool's public SSID), and POSTs
 JSON to a configurable endpoint every minute. Bounds-checks every reading and
 rejects `DEVICE_DISCONNECTED_F`. Reconnects WiFi on drops. Serial debug at
 115200 baud.
 
-POST payload shape (the test server, the production server, and the test
-fixture all agree on this):
+POST payload shape:
 
 ```json
 {
@@ -78,63 +78,59 @@ fixture all agree on this):
 }
 ```
 
-`temp_f` at the top level is the &ldquo;primary&rdquo; reading (whichever
-sensor enumerated first &mdash; pin this in firmware if you care which is
-authoritative). The `sensors` array preserves every individual reading with
-its 64-bit ROM address.
+`temp_f` at the top level is the "primary" reading (whichever sensor
+enumerated first, unless you pin a specific ROM address via `primary_addr`).
+The `sensors` array preserves every individual reading with its 64-bit ROM
+address.
 
-Authentication: every POST sends an `X-API-Key` header. The default is
-`dev-key`; set `POOL_API_KEY` in the website&rsquo;s environment to rotate.
+**Authentication:** every POST sends an `X-API-Key` header. Default
+`dev-key`, rotatable via the device admin page (basic auth) or
+`tools\update-endpoints.py`.
 
-### Website: `website/`
+**HTTPS:** when the configured URL is `https://`, the firmware validates
+against the pinned Let's Encrypt ISRG Root X1 (in `src/main.cpp`) rather
+than disabling cert checks. ALPN is set to `http/1.1` so CDNs / ngrok edges
+that require it don't drop the handshake.
 
-Flask + Waitress + SQLite + Jinja2 + Chart.js (client-side from CDN). No
-build step.
+**Runtime config (NVS, see `src/config.cpp`):**
 
-| File | Purpose |
-|------|---------|
-| `app.py` | Routes, ingestion endpoint, background outdoor weather poller |
-| `db.py` | SQLite schema + helpers (`pool_readings`, `pool_sensor_readings`, `outdoor_readings`) |
-| `weather.py` | Outdoor temperature source chain (see below) |
-| `templates/` | `base.html`, `index.html`, `temperature.html` (Jinja2) |
-| `static/` | `style.css`, `app.js` (live-tile hydration), `temperature.js` (Chart.js) |
-| `run.bat` | One-click venv-and-start for dev |
+| Key | Default | Purpose |
+|---|---|---|
+| `endpoint_primary` | `http://montesanoclub.org/temps/update` | first URL tried |
+| `endpoint_fallback` | `https://niece-tweet-flame.ngrok-free.dev/reading` | retried on non-2xx |
+| `api_key` | `dev-key` | `X-API-Key` value |
+| `sample_period_ms` | `60000` | how often we sample + POST |
+| `min_valid_f` / `max_valid_f` | `0.0` / `130.0` | bounds-reject before sending |
+| `primary_addr` | `""` | ROM address of the "authoritative" sensor (optional) |
+| `device_label` | `pool-equip-shed` | tag included in payload |
+| `admin_user` / `admin_pass` | `admin` / `changeme` | basic auth for the device's web UI |
+| `ota_password` | `pool-ota` | ArduinoOTA auth |
 
-#### Outdoor temperature sources
+Endpoint contract (what the receiver needs to accept) is in
+`docs/server-endpoint-spec.md`.
 
-Tried in order; the first one returning a valid reading wins:
+### On-device admin web UI
 
-1. **Wunderground PWS (authenticated)** &mdash; if `WUNDERGROUND_API_KEY` is
-   set. Tries each station ID in `WUNDERGROUND_STATION_IDS`
-   (comma-separated). Default order: `KALHUNTS560,KALHUNTS264` (both on
-   Monte Sano in Huntsville, AL).
-2. **Wunderground PWS (public)** &mdash; no key required. Uses the same
-   anonymous key that `wunderground.com`&rsquo;s own dashboard widget uses.
-   Subject to that key remaining accessible.
-3. **OpenWeatherMap** &mdash; if `OWM_API_KEY` is set.
-4. **NWS (api.weather.gov)** &mdash; always available, no key. Defaults to
-   station `KHSV` (Huntsville International).
+Once the ESP32 is on WiFi, it advertises mDNS as `pool-temp.local` and
+hosts a tiny HTTP admin server on port 80:
 
-The background poller runs every 10 minutes (`WEATHER_POLL_SECONDS`).
+| Verb | Path | Purpose |
+|---|---|---|
+| GET  | `/`       | HTML form for editing the runtime config (basic auth) |
+| POST | `/save`   | persist form values to NVS (basic auth) |
+| GET  | `/status` | JSON telemetry (no auth) |
+| POST | `/reboot` | reboot the device (basic auth) |
 
-#### HTTP API
+### ArduinoOTA
 
-| Verb | Path | Notes |
-|------|------|-------|
-| GET  | `/`             | Home page (live tiles + intro + features + CTA) |
-| GET  | `/temperature`  | Historical chart page (range selector + stats grid) |
-| GET  | `/api/current`  | JSON: latest pool + outdoor + age-in-seconds |
-| GET  | `/api/history?range=24h\|7d\|30d` | JSON: pool + outdoor time series |
-| POST | `/reading`      | Firmware ingestion. Requires `X-API-Key`. |
-| GET  | `/healthz`      | `{"ok": true}` |
+Hostname `pool-temp.local`, password from NVS (`ota_password`). Useful
+once the box is sealed.
 
 ## Quick start
 
-### 1. Build & flash the firmware
-
 ```bash
 # from project root, with PlatformIO installed
-cp src/secrets.example.h src/secrets.h     # fill in real WiFi creds
+cp src/secrets.example.h src/secrets.h     # fill in WiFi creds (DEV + FALLBACK)
 pio run -e esp32dev -t upload -t monitor
 ```
 
@@ -142,183 +138,64 @@ You should see:
 
 ```
 === pool-temp boot ===
-[1wire] DS18B20 devices found: 2
+[cfg] primary=...
+[cfg] fallback=...
+[1wire] DS18B20 devices found: N
   [0] 28...E5
-  [1] 28...E6
 [wifi] scanning...
 [wifi] connecting to <ssid>...
-.......
 [wifi] connected, IP=192.168.x.x, RSSI=-XX
+[mdns] http://pool-temp.local/
+[ota] ready
 [temp] 28...E5 = 78.42 F
 [json] {"sensors":[...],"temp_f":78.42}
-[http] POST -> 200 {"ok": true, ...}
+[http] <url> -> 200 ...
 ```
 
-If `DS18B20 devices found: 0` &mdash; check the pull-up resistor, GND, and
-the GPIO 13 wire. If 2 sensors enumerate but their readings disagree by
-&gt;1&deg;F under matching conditions, one isn&rsquo;t in thermal contact.
+If `DS18B20 devices found: 0` — check the pull-up resistor, GND, and the
+GPIO 13 wire. If two sensors enumerate but their readings disagree by
+>1 °F under matching conditions, one isn't in thermal contact.
 
-### 2. Run the website locally
+## Tools
 
-```bash
-cd website
-python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt
-.venv\Scripts\python app.py             # dev server on :18080
-```
+`tools/` contains firmware-side helpers only:
 
-Open `http://localhost:18080/`. The ESP32 should be POSTing to whichever
-machine matches the `ENDPOINT` constant in `src/main.cpp`; for development
-that&rsquo;s the LAN IP of your desktop.
-
-For production (a real WSGI server):
-
-```bash
-.venv\Scripts\waitress-serve --listen=0.0.0.0:18080 app:app
-```
-
-### 3. Install as a Windows service (autostart on boot)
-
-```powershell
-# Run as Administrator
-.\tools\install-service.ps1
-```
-
-This installs NSSM (via winget if missing), stops any dev Flask process,
-registers `PoolTempWebsite` as an autostart service running Waitress, and
-puts logs in `website/logs/`.
-
-Manage it with:
-
-```powershell
-Get-Service PoolTempWebsite
-Restart-Service PoolTempWebsite
-Stop-Service    PoolTempWebsite
-```
-
-### 4. Expose it on the public internet
-
-Three approaches, in order of &ldquo;how fast can I demo this.&rdquo;
-
-#### Option A: ngrok (fastest; great for demos)
-
-```yaml
-# %LOCALAPPDATA%\ngrok\ngrok.yml
-version: "2"
-authtoken: <your ngrok token>
-tunnels:
-  pool:
-    proto: http
-    addr: 18080
-```
-
-```powershell
-ngrok start --all
-# pull the public URL from http://127.0.0.1:4040/api/tunnels
-```
-
-Pros: no DNS, no port forwarding, no Windows networking quirks, immune to
-VPN routing. Cons: random subdomain on free tier (claim a free static
-domain in the dashboard to fix that).
-
-#### Option B: Caddy + your own domain
-
-Reverse-proxy on the Windows host, automatic Let&rsquo;s Encrypt certificates
-via HTTP-01 challenge.
-
-```powershell
-# Run as Administrator
-.\tools\install-caddy.ps1
-```
-
-The `Caddyfile` (`caddy/Caddyfile`) sets up the public hostname. Requires:
-
-- DNS A record pointing at your public WAN IP
-- Router/firewall forwarding 80 and 443 to the Windows host&rsquo;s LAN IP
-- Nothing else on the host listening on 80/443
-
-Two gotchas worth flagging:
-
-- **WSL2 localhost forwarding**: any service inside WSL listening on `:80`
-  silently reserves the Windows-side port. `wsl --shutdown` releases it, or
-  set `localhostForwarding=false` in `%USERPROFILE%\.wslconfig`.
-- **Hyper-V port reservations**: WinNAT can claim port ranges dynamically.
-  If Caddy reports `Only one usage of each socket address...permitted` with
-  nothing visibly bound, `netsh int ipv4 add excludedportrange protocol=tcp
-  startport=80 numberofports=1` after stopping winnat.
-
-#### Option C: Cloudflare Tunnel
-
-Outbound from the Windows host to Cloudflare&rsquo;s edge. No port forwarding,
-no DDNS, immune to VPN egress. Not scripted in this repo yet.
-
-### 5. Dynamic DNS (only if you&rsquo;re using your own domain on a residential
-   IP)
-
-```powershell
-# Run as Administrator
-.\tools\install-ddns.ps1
-```
-
-Prompts for your Cloudflare API token (scope: Zone:DNS:Edit), zone name
-(e.g. `example.com`), and record name. Stores them as machine-scope
-environment variables and registers `PoolTempCloudflareDDNS` as a
-scheduled task that runs every 5 minutes as SYSTEM. The script lives at
-`tools/cloudflare_ddns.py`.
+| Script | Purpose |
+|---|---|
+| `flash.ps1`, `flash-auto.ps1` | esptool wrappers — see the board-quirks notes in CLAUDE.md / Claude memory for the manual BOOT-dance timing this hardware needs |
+| `monitor.ps1` | open the serial monitor at 115200 |
+| `chip-id.ps1` | read MAC + chip rev |
+| `show-config.py` | scrape current NVS config + telemetry from the device admin page |
+| `update-endpoints.py` | push new primary/fallback URLs to the device, then poll a local API for a fresh sample as confirmation |
+| `update-fallback.py` | same idea, fallback-only |
+| `tcp-probe.py` | TCP sanity check against a host/port |
+| `disable-services.ps1` | one-time cleanup (elevated) — stops & disables `PoolTempCaddy`, removes the firewall rules for 80/443. Safe to run again; idempotent. |
 
 ## File layout
 
 ```
 pool-temp/
-  CLAUDE.md                  -- project notes / context for AI assistants
-  README.md                  -- this file
-  platformio.ini             -- esp32dev env + library deps
+  CLAUDE.md             -- project notes / context for AI assistants
+  README.md             -- this file
+  platformio.ini        -- esp32dev env + library deps
+  docs/
+    server-endpoint-spec.md  -- contract for whoever runs the HTTP receiver
   src/
     main.cpp                 -- ESP32 firmware
+    config.cpp / config.h    -- NVS-backed runtime config
+    admin_page.cpp / .h      -- on-device admin web UI
     secrets.example.h        -- WiFi credentials template (committed)
     secrets.h                -- real WiFi credentials (gitignored)
-  website/
-    app.py                   -- Flask app
-    db.py                    -- SQLite layer
-    weather.py               -- outdoor temp source chain
-    requirements.txt
-    run.bat
-    templates/
-      base.html, index.html, temperature.html
-    static/
-      style.css, app.js, temperature.js
-  caddy/
-    Caddyfile                -- reverse proxy + Let's Encrypt
-  test-server/
-    server.py                -- standalone stdlib HTTP receiver (legacy)
-  tools/
-    install-service.ps1      -- website as Windows service
-    install-caddy.ps1        -- Caddy as Windows service + firewall
-    install-ddns.ps1         -- Cloudflare DDNS scheduled task
-    cloudflare_ddns.py       -- one-shot DDNS updater
+  tools/                -- ESP32-side helpers (see table above)
+  website/              -- ORPHANED. Old local receiver/dashboard. Not part of the project anymore.
+  test-server/          -- ORPHANED. Tiny stdlib HTTP receiver used during bring-up.
 ```
-
-## Environment variables
-
-| Variable | Used by | Default |
-|----------|---------|---------|
-| `POOL_API_KEY` | website (`/reading` auth) | `dev-key` |
-| `PORT` | website | `18080` |
-| `WEATHER_POLL_SECONDS` | weather poller | `600` (10 min) |
-| `WUNDERGROUND_API_KEY` | weather (authenticated PWS) | unset |
-| `WUNDERGROUND_STATION_IDS` | weather (PWS list) | `KALHUNTS560,KALHUNTS264` |
-| `OWM_API_KEY` | weather (OpenWeatherMap) | unset |
-| `CF_API_TOKEN` | DDNS updater | required |
-| `CF_ZONE_NAME` | DDNS updater | required |
-| `CF_RECORD_NAME` | DDNS updater | defaults to zone name |
 
 ## Future / nice-to-have
 
-- ArduinoOTA for over-the-air firmware updates &mdash; set up *before* the
-  enclosure is sealed.
-- A watchdog timer for total hangs (not just WiFi drops).
+- Watchdog timer for total hangs (not just WiFi drops).
+- Replace the "first sensor wins" primary-temp logic with a hard-coded
+  ROM address so swapping the cable doesn't change which reading is
+  authoritative.
 - Pump-on detection via a current-sensing clamp on the pump leg, so the
-  website can flag stale readings when the pump is off.
-- Replace the &ldquo;first sensor wins&rdquo; primary-temp logic with a
-  hard-coded ROM address so swapping the cable doesn&rsquo;t change which
-  reading is authoritative.
+  receiver can flag stale readings when the pump is off.
