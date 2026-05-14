@@ -38,8 +38,16 @@
         bind("pool.temp", fmtTempF(t));
         bind("pool.temp-small", fmtTempF(t));
         const sensorCount = (data.pool.sensors || []).length;
-        const sensorLabel = sensorCount === 1 ? "1 sensor" : `${sensorCount} sensors`;
-        bind("pool.meta", `${fmtAge(data.pool.age_seconds)} · ${sensorLabel}`);
+        // The reading either came from the ESP32 (sensors[] populated) or
+        // from our scrape of the club site (sensors[] empty). Show the
+        // source so it's obvious which.
+        let label;
+        if (sensorCount === 0 && data.pool.source && data.pool.source.startsWith("scrape:")) {
+          label = "via club site";
+        } else {
+          label = sensorCount === 1 ? "1 sensor" : `${sensorCount} sensors`;
+        }
+        bind("pool.meta", `${fmtAge(data.pool.age_seconds)} · ${label}`);
         bind("pool.ago", fmtAge(data.pool.age_seconds));
       } else {
         bind("pool.temp", "—");

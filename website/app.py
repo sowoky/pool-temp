@@ -88,9 +88,41 @@ def _start_hourly_thread():
     t.start()
 
 
+def _live_scrape_loop():
+    """Every 60s, scrape the club site for the current water temp and insert
+    into pool_readings so /api/current (the home page tile) sees fresh data
+    without needing the device to POST to us directly. When the firmware
+    eventually starts POSTing here again, those rows are newer and win on
+    'latest' lookups -- this scrape just fills in when the device's
+    primary endpoint is the club and we'd otherwise have stale tiles."""
+    time.sleep(15)
+    while True:
+        try:
+            water_f, water_age = weather.fetch_club_pool_temp()
+            if water_f is not None:
+                payload = {
+                    "temp_f": water_f,
+                    "sensors": [],
+                    "source": "scrape:montesanoclub.org/pool",
+                    "label":  "club-scrape",
+                    "club_reported_age_s": water_age,
+                }
+                db.insert_pool_reading(payload, remote_ip="scrape")
+                print(f"[scrape] water={water_f}F age={water_age}s -> pool_readings")
+        except Exception as e:
+            print(f"[scrape] error: {e}")
+        time.sleep(60)
+
+
+def _start_live_scrape_thread():
+    t = threading.Thread(target=_live_scrape_loop, daemon=True, name="live-scrape")
+    t.start()
+
+
 # kick off background pollers; daemons so they die with the process
 _start_weather_thread()
 _start_hourly_thread()
+_start_live_scrape_thread()
 
 
 # ---------------------------------------------------------------- helpers

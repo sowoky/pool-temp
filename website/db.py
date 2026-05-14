@@ -101,7 +101,7 @@ def insert_outdoor_reading(source: str, temp_f: float, station_id: str | None, r
 def latest_pool_reading() -> dict | None:
     with connect() as c:
         row = c.execute(
-            "SELECT id, ts, temp_f FROM pool_readings ORDER BY id DESC LIMIT 1"
+            "SELECT id, ts, temp_f, raw_json FROM pool_readings ORDER BY id DESC LIMIT 1"
         ).fetchone()
         if not row:
             return None
@@ -109,10 +109,21 @@ def latest_pool_reading() -> dict | None:
             "SELECT addr, temp_f FROM pool_sensor_readings WHERE reading_id = ?",
             (row["id"],),
         ).fetchall()
+    # Pull a few optional metadata fields out of the raw payload so the home
+    # page can show "via club site" vs "N sensors" without another query.
+    source = label = None
+    try:
+        raw = json.loads(row["raw_json"]) if row["raw_json"] else {}
+        source = raw.get("source")
+        label  = raw.get("label")
+    except (ValueError, TypeError):
+        pass
     return {
         "ts": row["ts"],
         "temp_f": row["temp_f"],
         "sensors": [{"addr": s["addr"], "temp_f": s["temp_f"]} for s in sensors],
+        "source": source,
+        "label":  label,
     }
 
 
