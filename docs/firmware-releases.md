@@ -30,6 +30,24 @@ That's it. The device gets the new firmware in ≤ 1 hour without you touching i
 The device follows the URL string inside the manifest, so we can move the
 binary to a different host any time by editing only the manifest.
 
+## One-time setup: GitHub Secrets
+
+`src/secrets.h` (WiFi credentials) is gitignored, so the CI runner has no
+copy. Add these four secrets at
+**Settings → Secrets and variables → Actions** before CI can build a
+publishable firmware:
+
+| Secret name        | Value                                               |
+|--------------------|-----------------------------------------------------|
+| `PT_DEV_SSID`      | Primary WiFi SSID the device tries first            |
+| `PT_DEV_PASS`      | Its password                                        |
+| `PT_FALLBACK_SSID` | Secondary WiFi SSID (e.g. pool's network)           |
+| `PT_FALLBACK_PASS` | Secondary password — leave **unset** for an open network |
+
+If `PT_DEV_SSID` isn't set the build fails fast (with a clear error) so we
+never accidentally publish a binary with stub creds that would brick the
+device on update.
+
 ## How to cut a release
 
 1. Edit `src/main.cpp` → bump `FW_VERSION` (e.g. `"1.1.1"` → `"1.1.2"`).
