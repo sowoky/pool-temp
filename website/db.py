@@ -1,4 +1,4 @@
-"""SQLite layer for pool temp readings + outdoor weather cache."""
+"""SQLite layer for pool temp readings + outdoor weather cache + PWS history."""
 
 import json
 import sqlite3
@@ -50,6 +50,48 @@ CREATE TABLE IF NOT EXISTS hourly_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_hourly_log_ts ON hourly_log(ts);
+
+-- Backfilled history from Weather Underground PWS "history/all" endpoint.
+-- One row per (station, observation timestamp). Stores rich payload so we
+-- can mine dewpoint/wind/precip later without re-pulling.
+CREATE TABLE IF NOT EXISTS pws_history (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    station_id   TEXT    NOT NULL,
+    ts           TEXT    NOT NULL,      -- ISO UTC, second-resolution
+    temp_f       REAL,
+    dewpt_f      REAL,
+    humidity     REAL,
+    wind_speed   REAL,
+    wind_gust    REAL,
+    wind_dir     REAL,
+    pressure_in  REAL,
+    precip_rate  REAL,
+    precip_total REAL,
+    solar_rad    REAL,
+    uv           REAL,
+    raw_json     TEXT,
+    UNIQUE(station_id, ts)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pws_history_station_ts ON pws_history(station_id, ts);
+CREATE INDEX IF NOT EXISTS idx_pws_history_ts         ON pws_history(ts);
+
+-- Backfilled history from NWS for KHSV airport ASOS. Same shape as the live
+-- 'outdoor_readings' rows where source='nws', but pre-loaded going back days/weeks.
+CREATE TABLE IF NOT EXISTS nws_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    station_id  TEXT    NOT NULL,       -- e.g. 'KHSV'
+    ts          TEXT    NOT NULL,
+    temp_f      REAL,
+    dewpt_f     REAL,
+    humidity    REAL,
+    wind_speed  REAL,
+    pressure_mb REAL,
+    raw_json    TEXT,
+    UNIQUE(station_id, ts)
+);
+
+CREATE INDEX IF NOT EXISTS idx_nws_history_station_ts ON nws_history(station_id, ts);
 """
 
 
@@ -109,8 +151,6 @@ def latest_pool_reading() -> dict | None:
             "SELECT addr, temp_f FROM pool_sensor_readings WHERE reading_id = ?",
             (row["id"],),
         ).fetchall()
-    # Pull a few optional metadata fields out of the raw payload so the home
-    # page can show "via club site" vs "N sensors" without another query.
     source = label = None
     try:
         raw = json.loads(row["raw_json"]) if row["raw_json"] else {}
@@ -161,7 +201,9 @@ def range_to_since(range_key: str) -> datetime:
         "24h": now - timedelta(hours=24),
         "7d":  now - timedelta(days=7),
         "30d": now - timedelta(days=30),
+        "90d": now - timedelta(days=90),
         "1y":  now - timedelta(days=365),
+        "2y":  now - timedelta(days=730),
         "all": datetime(1970, 1, 1, tzinfo=timezone.utc),
     }.get(range_key, now - timedelta(hours=24))
 
@@ -190,5 +232,118 @@ def hourly_log(since: datetime) -> list[dict]:
             "SELECT ts, water_f, water_age_s, water_source, air_550_f, air_264_f, error "
             "FROM hourly_log WHERE ts >= ? ORDER BY ts ASC",
             (cutoff,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------- PWS history
+
+def insert_pws_observation(station_id: str, obs: dict) -> None:
+    """Insert one PWS observation row from a WU history payload.
+
+    `obs` is one element of the 'observations' list returned by
+    /v2/pws/history/all. We pull both the top-level fields and the 'imperial'
+    sub-block, since `tempAvg` etc. live inside it."""
+    ts = obs.get("obsTimeUtc")
+    if not ts:
+        return
+    imp = obs.get("imperial") or {}
+    with connect() as c:
+        c.execute(
+            "INSERT OR IGNORE INTO pws_history "
+            "(station_id, ts, temp_f, dewpt_f, humidity, wind_speed, wind_gust, wind_dir, "
+            " pressure_in, precip_rate, precip_total, solar_rad, uv, raw_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                station_id,
+                ts,
+                imp.get("tempAvg") if imp.get("tempAvg") is not None else imp.get("temp"),
+                imp.get("dewptAvg") if imp.get("dewptAvg") is not None else imp.get("dewpt"),
+                obs.get("humidityAvg") if obs.get("humidityAvg") is not None else obs.get("humidity"),
+                imp.get("windspeedAvg") if imp.get("windspeedAvg") is not None else imp.get("windSpeed"),
+                imp.get("windgustHigh") if imp.get("windgustHigh") is not None else imp.get("windGust"),
+                obs.get("winddirAvg") if obs.get("winddirAvg") is not None else obs.get("winddir"),
+                imp.get("pressureMax") if imp.get("pressureMax") is not None else imp.get("pressure"),
+                imp.get("precipRate"),
+                imp.get("precipTotal"),
+                obs.get("solarRadiationHigh") if obs.get("solarRadiationHigh") is not None else obs.get("solarRadiation"),
+                obs.get("uvHigh") if obs.get("uvHigh") is not None else obs.get("uvIndex"),
+                json.dumps(obs, separators=(",", ":")),
+            ),
+        )
+
+
+def pws_history_range(station_id: str, since: datetime) -> list[dict]:
+    cutoff = since.astimezone(timezone.utc).isoformat(timespec="seconds")
+    with connect() as c:
+        rows = c.execute(
+            "SELECT ts, temp_f, dewpt_f, humidity, wind_speed, pressure_in "
+            "FROM pws_history WHERE station_id = ? AND ts >= ? ORDER BY ts ASC",
+            (station_id, cutoff),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def pws_history_count(station_id: str) -> int:
+    with connect() as c:
+        row = c.execute(
+            "SELECT COUNT(*) AS n, MIN(ts) AS first_ts, MAX(ts) AS last_ts "
+            "FROM pws_history WHERE station_id = ?",
+            (station_id,),
+        ).fetchone()
+    return dict(row)
+
+
+def pws_paired_history(station_a: str, station_b: str, since: datetime) -> list[dict]:
+    """Return rows where both stations have an observation at the same ts.
+    The two stations report on the same 5-minute boundaries, so an exact ts
+    match works for the vast majority of points; mismatches just drop."""
+    cutoff = since.astimezone(timezone.utc).isoformat(timespec="seconds")
+    with connect() as c:
+        rows = c.execute(
+            "SELECT a.ts, a.temp_f AS a_temp, b.temp_f AS b_temp, "
+            "       a.humidity AS a_hum, b.humidity AS b_hum, "
+            "       a.dewpt_f AS a_dew,  b.dewpt_f AS b_dew "
+            "FROM pws_history a "
+            "JOIN pws_history b ON a.ts = b.ts "
+            "WHERE a.station_id = ? AND b.station_id = ? AND a.ts >= ? "
+            "ORDER BY a.ts ASC",
+            (station_a, station_b, cutoff),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------- NWS history
+
+def insert_nws_observation(station_id: str, ts: str, props: dict) -> None:
+    with connect() as c:
+        tc = (props.get("temperature") or {}).get("value")
+        dc = (props.get("dewpoint")    or {}).get("value")
+        rh = (props.get("relativeHumidity") or {}).get("value")
+        ws = (props.get("windSpeed") or {}).get("value")
+        pm = (props.get("seaLevelPressure") or {}).get("value")
+        c.execute(
+            "INSERT OR IGNORE INTO nws_history "
+            "(station_id, ts, temp_f, dewpt_f, humidity, wind_speed, pressure_mb, raw_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                station_id, ts,
+                None if tc is None else tc * 9.0 / 5.0 + 32.0,
+                None if dc is None else dc * 9.0 / 5.0 + 32.0,
+                rh,
+                ws,
+                None if pm is None else pm / 100.0,
+                json.dumps(props, separators=(",", ":")),
+            ),
+        )
+
+
+def nws_history_range(station_id: str, since: datetime) -> list[dict]:
+    cutoff = since.astimezone(timezone.utc).isoformat(timespec="seconds")
+    with connect() as c:
+        rows = c.execute(
+            "SELECT ts, temp_f, dewpt_f, humidity, wind_speed FROM nws_history "
+            "WHERE station_id = ? AND ts >= ? ORDER BY ts ASC",
+            (station_id, cutoff),
         ).fetchall()
     return [dict(r) for r in rows]

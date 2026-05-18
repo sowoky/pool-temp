@@ -1,4 +1,5 @@
-// /temperature page: history chart + range buttons + summary stats.
+// /temperature — pool + air history chart.
+// Tooltip: hovering shows a formatted timestamp + both series at that point.
 
 (function () {
   if (typeof Chart === "undefined") return;
@@ -6,16 +7,22 @@
   const ctx = document.getElementById("tempChart");
   if (!ctx) return;
 
+  // ---- dark-theme defaults so we don't repeat ourselves ----
+  Chart.defaults.color = "rgba(241, 234, 212, .72)";
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  Chart.defaults.borderColor = "rgba(187, 229, 240, .12)";
+
+  // colors come from CSS vars so the chart and the page stay in sync.
+  const css = getComputedStyle(document.documentElement);
+  const COL_POOL    = (css.getPropertyValue("--pool") || "#38d6df").trim();
+  const COL_POOL_SF = "rgba(56, 214, 223, .14)";
+  const COL_AIR     = (css.getPropertyValue("--air")  || "#ff8a3d").trim();
+
   let chart;
   let currentRange = "24h";
 
-  // honor ?focus=pool|outdoor for the future, currently both lines always shown
-  const params = new URLSearchParams(window.location.search);
-  const initialFocus = params.get("focus");
-
   function tickUnit(range) {
     if (range === "24h") return "hour";
-    if (range === "7d")  return "day";
     return "day";
   }
 
@@ -42,6 +49,18 @@
     document.querySelector('[data-stat="outdoor.avg"]').textContent = fmt(os.avg);
   }
 
+  function fmtTooltipTitle(items) {
+    if (!items || !items.length) return "";
+    const ts = items[0].parsed.x;
+    return new Date(ts).toLocaleString("en-US", {
+      weekday: "short",
+      month:   "short",
+      day:     "numeric",
+      hour:    "numeric",
+      minute:  "2-digit",
+    });
+  }
+
   async function load(range) {
     const meta = document.getElementById("range-meta");
     meta.textContent = "Loading…";
@@ -59,21 +78,29 @@
         {
           label: "Pool",
           data: pool.map((p) => ({ x: p.x, y: p.temp_f })),
-          borderColor: getComputedStyle(document.documentElement).getPropertyValue("--pool").trim() || "#15808a",
-          backgroundColor: "rgba(21,128,138,.12)",
+          borderColor: COL_POOL,
+          backgroundColor: COL_POOL_SF,
           tension: 0.25,
           pointRadius: 0,
-          borderWidth: 2,
+          pointHoverRadius: 4,
+          pointHoverBackgroundColor: COL_POOL,
+          pointHoverBorderColor: "rgba(7,23,28,1)",
+          pointHoverBorderWidth: 2,
+          borderWidth: 2.4,
           fill: true,
         },
         {
-          label: "Outdoor",
+          label: "Outdoor air",
           data: outdoor.map((p) => ({ x: p.x, y: p.temp_f })),
-          borderColor: getComputedStyle(document.documentElement).getPropertyValue("--air").trim() || "#e89b2b",
-          backgroundColor: "rgba(232,155,43,.10)",
+          borderColor: COL_AIR,
+          backgroundColor: "rgba(255, 138, 61, .08)",
           tension: 0.25,
           pointRadius: 0,
-          borderWidth: 2,
+          pointHoverRadius: 4,
+          pointHoverBackgroundColor: COL_AIR,
+          pointHoverBorderColor: "rgba(7,23,28,1)",
+          pointHoverBorderWidth: 2,
+          borderWidth: 2.4,
           fill: false,
         },
       ];
@@ -85,12 +112,29 @@
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          interaction: { mode: "index", intersect: false },
+          animation: { duration: 350 },
+          interaction: { mode: "index", intersect: false, axis: "x" },
           plugins: {
-            legend: { position: "top" },
+            legend: {
+              position: "top",
+              align: "end",
+              labels: { boxWidth: 14, boxHeight: 2, padding: 16, color: "rgba(241,234,212,.85)" },
+            },
             tooltip: {
+              backgroundColor: "rgba(2, 9, 13, .92)",
+              borderColor: "rgba(212, 183, 94, .25)",
+              borderWidth: 1,
+              titleColor: "#f1ead4",
+              bodyColor: "#f1ead4",
+              titleFont: { weight: 600, size: 12 },
+              bodyFont: { family: "ui-monospace, SFMono-Regular, monospace", size: 12 },
+              padding: 10,
+              caretSize: 6,
+              displayColors: true,
+              boxPadding: 4,
               callbacks: {
-                label: (c) => `${c.dataset.label}: ${c.parsed.y.toFixed(2)}°F`,
+                title: fmtTooltipTitle,
+                label: (c) => `  ${c.dataset.label}: ${c.parsed.y.toFixed(2)}°F`,
               },
             },
           },
@@ -98,11 +142,15 @@
             x: {
               type: "time",
               time: { unit: tickUnit(range) },
-              grid: { color: "rgba(0,0,0,.06)" },
+              grid:   { color: "rgba(187, 229, 240, .06)" },
+              ticks:  { color: "rgba(241, 234, 212, .55)" },
+              border: { color: "rgba(187, 229, 240, .12)" },
             },
             y: {
-              title: { display: true, text: "°F" },
-              grid: { color: "rgba(0,0,0,.06)" },
+              title: { display: true, text: "°F", color: "rgba(241, 234, 212, .55)" },
+              grid:   { color: "rgba(187, 229, 240, .06)" },
+              ticks:  { color: "rgba(241, 234, 212, .55)" },
+              border: { color: "rgba(187, 229, 240, .12)" },
             },
           },
         },

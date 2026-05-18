@@ -3,8 +3,13 @@
 Routes:
     GET  /                    -- home page
     GET  /temperature         -- historical chart page
+    GET  /stations            -- PWS calibration / delta analysis
+    GET  /forecast            -- Monte Sano forecast + pool forecast (prophecy)
     GET  /api/current         -- current pool + outdoor temps
     GET  /api/history         -- pool + outdoor history (?range=24h|7d|30d)
+    GET  /api/hourly          -- hourly snapshot table
+    GET  /api/stations        -- both PWS series + delta stats (?range=)
+    GET  /api/forecast        -- NWS Huntsville forecast translated to Monte Sano + pool
     POST /reading             -- ESP32 ingestion (X-API-Key required)
     GET  /healthz             -- 200 OK for monitoring
 
@@ -21,12 +26,16 @@ from flask import Flask, jsonify, render_template, request
 
 import db
 import weather
+import forecast as fc
 
 API_KEY               = os.environ.get("POOL_API_KEY", "dev-key")
 WEATHER_POLL_SECONDS  = int(os.environ.get("WEATHER_POLL_SECONDS", "600"))   # 10 min
 PORT                  = int(os.environ.get("PORT", "18080"))
 
 app = Flask(__name__)
+# So edits to templates/ pick up without a process restart. Cheap on Flask.
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.jinja_env.auto_reload = True
 db.init()
 
 
@@ -53,9 +62,7 @@ def _start_weather_thread():
 
 def _hourly_loop():
     """Once an hour, snapshot (club water temp, KALHUNTS560 air, KALHUNTS264
-    air) into the hourly_log table. Decoupled from the firmware's own
-    POSTs so we have history even if our /reading ingestion is wrong/down."""
-    # First tick after 60s to give the rest of the app time to settle.
+    air) into the hourly_log table."""
     time.sleep(60)
     while True:
         err = None
@@ -69,12 +76,9 @@ def _hourly_loop():
             err = str(e)
         try:
             db.insert_hourly_log(
-                water_f=water_f,
-                water_age_s=water_age,
+                water_f=water_f, water_age_s=water_age,
                 water_source="montesanoclub.org/pool",
-                air_550_f=air_550,
-                air_264_f=air_264,
-                error=err,
+                air_550_f=air_550, air_264_f=air_264, error=err,
             )
             print(f"[hourly] water={water_f}F (age={water_age}s) "
                   f"air_550={air_550}F air_264={air_264}F err={err}")
@@ -90,11 +94,8 @@ def _start_hourly_thread():
 
 def _live_scrape_loop():
     """Every 60s, scrape the club site for the current water temp and insert
-    into pool_readings so /api/current (the home page tile) sees fresh data
-    without needing the device to POST to us directly. When the firmware
-    eventually starts POSTing here again, those rows are newer and win on
-    'latest' lookups -- this scrape just fills in when the device's
-    primary endpoint is the club and we'd otherwise have stale tiles."""
+    into pool_readings so /api/current sees fresh data without depending on
+    the firmware POSTing here directly."""
     time.sleep(15)
     while True:
         try:
@@ -119,7 +120,6 @@ def _start_live_scrape_thread():
     t.start()
 
 
-# kick off background pollers; daemons so they die with the process
 _start_weather_thread()
 _start_hourly_thread()
 _start_live_scrape_thread()
@@ -147,20 +147,24 @@ def temperature():
     return render_template("temperature.html")
 
 
+@app.route("/stations")
+def stations():
+    return render_template("stations.html")
+
+
+@app.route("/forecast")
+def forecast_page():
+    return render_template("forecast.html")
+
+
 # ---------------------------------------------------------------- api
 @app.route("/api/current")
 def api_current():
     pool = db.latest_pool_reading()
     outdoor = db.latest_outdoor_reading()
     return jsonify({
-        "pool":    {
-            **pool,
-            "age_seconds": _age_seconds(pool["ts"]),
-        } if pool else None,
-        "outdoor": {
-            **outdoor,
-            "age_seconds": _age_seconds(outdoor["ts"]),
-        } if outdoor else None,
+        "pool":    {**pool, "age_seconds": _age_seconds(pool["ts"])} if pool else None,
+        "outdoor": {**outdoor, "age_seconds": _age_seconds(outdoor["ts"])} if outdoor else None,
     })
 
 
@@ -183,6 +187,54 @@ def api_hourly():
         "range":   range_key,
         "rows":    db.hourly_log(since),
     })
+
+
+@app.route("/api/stations")
+def api_stations():
+    range_key = request.args.get("range", "30d")
+    since = db.range_to_since(range_key)
+    s550 = db.pws_history_range("KALHUNTS560", since)
+    s264 = db.pws_history_range("KALHUNTS264", since)
+    paired = db.pws_paired_history("KALHUNTS560", "KALHUNTS264", since)
+    deltas = [r["a_temp"] - r["b_temp"] for r in paired
+              if r["a_temp"] is not None and r["b_temp"] is not None]
+
+    def _stats(vals):
+        if not vals:
+            return {"n": 0, "mean": None, "min": None, "max": None,
+                    "abs_mean": None, "stdev": None}
+        n = len(vals)
+        m = sum(vals) / n
+        return {
+            "n":        n,
+            "mean":     m,
+            "min":      min(vals),
+            "max":      max(vals),
+            "abs_mean": sum(abs(v) for v in vals) / n,
+            "stdev":    (sum((v - m) ** 2 for v in vals) / n) ** 0.5,
+        }
+
+    counts_550 = db.pws_history_count("KALHUNTS560")
+    counts_264 = db.pws_history_count("KALHUNTS264")
+
+    return jsonify({
+        "range":      range_key,
+        "stations":   {
+            "KALHUNTS560": {"series": s550, "coverage": counts_550},
+            "KALHUNTS264": {"series": s264, "coverage": counts_264},
+        },
+        "paired_delta": {
+            "series":   [{"ts": r["ts"], "delta": r["a_temp"] - r["b_temp"]}
+                         for r in paired if r["a_temp"] is not None and r["b_temp"] is not None],
+            "stats":    _stats(deltas),
+            "convention": "KALHUNTS560 minus KALHUNTS264",
+        },
+    })
+
+
+@app.route("/api/forecast")
+def api_forecast():
+    return jsonify(fc.assemble_prophecy())
 
 
 # ---------------------------------------------------------------- ingestion

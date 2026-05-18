@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Monte Sano Club &mdash; Good Views. Good Vibes.{% endblock %}
+{% block title %}Monte Sano Pool — Thermal Observatory{% endblock %}
+{% set active = 'home' %}
 
 {% block content %}
 
@@ -9,42 +10,32 @@
 
   <div class="hero-inner">
     <h1>
-      <span class="hero-pretitle">Welcome to</span>
-      <span class="hero-title">Monte Sano Club</span>
+      <span class="hero-pretitle">Monte Sano · Thermal Observatory</span>
+      <span class="hero-title">How warm is the water?</span>
     </h1>
     <p class="hero-lead">
-      Where summer happens on the mountain &mdash; pool, courts, and a porch full of neighbors,
-      with the same view every July afternoon for the last sixty years.
+      One probe on the filter return line. Two weather stations on the ridge.
+      One airport ASOS down in the valley. Numbers updated minute by minute.
     </p>
     <div class="hero-btns">
       <div class="hero-btn-row">
-        <a class="btn-ghost" href="#events">Events</a>
-        <a class="btn-ghost" href="#makos">Makos</a>
-        <a class="btn-ghost" href="#news">News</a>
+        <a class="btn-primary" href="/temperature">See the chart</a>
+        <a class="btn-ghost"   href="/stations">Station deltas</a>
+        <a class="btn-ghost"   href="/forecast">Prophecy</a>
       </div>
-      <a class="btn-ghost" href="/temperature">Pool Temp &mdash; Live</a>
     </div>
-  </div>
-
-  <svg class="hero-wave" viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
-    <path fill="#004f5e" d="M0,40 C240,80 480,0 720,40 C960,80 1200,0 1440,40 L1440,100 L0,100 Z"></path>
-  </svg>
-
-  <div class="hero-badge">
-    <img src="https://montesanoclub.org/images/GoodViewsGoodVibes-blueonteal.svg"
-         alt="Good Views Good Vibes">
   </div>
 </section>
 
 <section class="temp-strip" id="live">
   <div class="temp-strip-inner">
     <a class="temp-card temp-card-pool" href="/temperature?focus=pool" data-source="pool">
-      <span class="temp-label">Pool Temp</span>
+      <span class="temp-label"><span class="live-pulse"></span>Pool water</span>
       <span class="temp-value" data-bind="pool.temp">&mdash;</span>
       <span class="temp-meta" data-bind="pool.meta">Waiting for a reading&hellip;</span>
     </a>
     <a class="temp-card temp-card-air" href="/temperature?focus=outdoor" data-source="outdoor">
-      <span class="temp-label">Outdoor Air</span>
+      <span class="temp-label"><span class="live-pulse"></span>Outdoor air</span>
       <span class="temp-value" data-bind="outdoor.temp">&mdash;</span>
       <span class="temp-meta" data-bind="outdoor.meta">Waiting for a reading&hellip;</span>
     </a>
@@ -54,19 +45,18 @@
 <section class="intro">
   <div class="intro-inner">
     <h2 class="font-serif">
-      <span class="intro-h2-1">Live conditions from</span>
-      <span class="intro-h2-2">the pool, all summer long.</span>
+      <span class="intro-h2-1">A small experiment in</span>
+      <span class="intro-h2-2">pretending we can predict the pool.</span>
     </h2>
     <p>
-      A small sensor strapped to the filter return line reads the water every sixty seconds and
-      posts straight to this page. Outdoor air comes from a neighbor&rsquo;s weather station up the
-      ridge. No app to install, nothing to log into &mdash; if you&rsquo;re wondering whether the pool
-      is warm yet, this tells you.
+      The water reading comes from a DS18B20 strapped to the filter return PVC.
+      Outdoor air is whichever of two neighborhood Weather Underground stations
+      answers first. None of this is an official anything — it's a sandbox for
+      figuring out whether Monte Sano really does run ten degrees cooler than
+      Huntsville (it does, sometimes) and whether we can forecast the pool
+      from the air (we're going to try).
     </p>
   </div>
-  <svg class="intro-wave" viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
-    <path fill="#f4f1ed" d="M0,40 C240,80 480,0 720,40 C960,80 1200,0 1440,40 L1440,100 L0,100 Z"></path>
-  </svg>
 </section>
 
 <section class="features">
@@ -75,40 +65,32 @@
       <div class="feature-image"
            style="background-image:url('https://montesanoclub.org/images/pool-swim-team.png')"></div>
       <div class="feature-body">
-        <h3>Pool Temperature Right Now</h3>
-        <p>Live water and air temperatures, plus 24-hour and weekly history charts.</p>
-        <span class="feature-link">View History</span>
+        <span class="feature-eyebrow">Observation</span>
+        <h3>Water &amp; Air — Live and Historical</h3>
+        <p>Last 24 h, 7 days, 30 days. Pool water against outdoor air, sample by sample.</p>
+        <span class="feature-link">Open the chart →</span>
       </div>
     </a>
-    <a class="feature-card" href="#events">
+    <a class="feature-card" href="/stations">
       <div class="feature-image"
-           style="background-image:url('https://montesanoclub.org/images/community-member.png')"></div>
+           style="background:linear-gradient(135deg,#0e2a32,#143540)"></div>
       <div class="feature-body">
-        <h3>Events &amp; Teams Bring the Community Together</h3>
-        <p>Band nights on the patio, swim meets, summer socials &mdash; the whole season&rsquo;s lineup.</p>
-        <span class="feature-link">Events</span>
+        <span class="feature-eyebrow">Calibration</span>
+        <h3>The Two Stations, Side by Side</h3>
+        <p>KALHUNTS560 vs. KALHUNTS264 — how big is the delta, and which one do we trust?</p>
+        <span class="feature-link">Compare them →</span>
       </div>
     </a>
-    <a class="feature-card" href="#news">
+    <a class="feature-card" href="/forecast">
       <div class="feature-image"
-           style="background-image:url('https://montesanoclub.org/images/monte-sano-sign.png')"></div>
+           style="background:radial-gradient(circle at center, #1a2e35 0%, #02090d 70%)"></div>
       <div class="feature-body">
-        <h3>News &amp; Announcements</h3>
-        <p>Closures, swim-team updates, board notes, the stuff members actually need to know.</p>
-        <span class="feature-link">News</span>
+        <span class="feature-eyebrow">Prophecy</span>
+        <h3>The Mountain Doesn't Get the Huntsville Forecast</h3>
+        <p>Translate the KHSV forecast into a Monte Sano forecast, then into a pool forecast.</p>
+        <span class="feature-link">Consult the eye →</span>
       </div>
     </a>
-  </div>
-</section>
-
-<section class="cta">
-  <div class="cta-inner">
-    <h2>Ready to take a dip?</h2>
-    <p>Live data is free to watch. Membership&rsquo;s the way you actually get in the water.</p>
-    <div class="cta-btns">
-      <a class="btn-orange" href="#members">Apply for Membership</a>
-      <a class="btn-outline" href="/temperature">See the Pool Temp</a>
-    </div>
   </div>
 </section>
 

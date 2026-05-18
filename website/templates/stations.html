@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Stations — Monte Sano Observatory{% endblock %}
+{% set active = 'stations' %}
+
+{% block content %}
+
+<section class="page-hero">
+  <h1>
+    <span class="hero-pretitle">Calibration</span>
+    <span class="hero-title">The Two Stations</span>
+  </h1>
+  <p class="hero-lead">
+    Two Weather Underground PWS units, both within ~1.5 mi of the pool. We poll
+    whichever answers first. This page is the audit: how far apart do they read,
+    and is one more trustworthy than the other?
+  </p>
+</section>
+
+<section class="stations-page">
+  <div class="station-grid">
+    <div class="station-card station-560">
+      <div class="station-id">KALHUNTS560</div>
+      <div class="station-now">
+        <span class="num" data-bind="s560.temp">—</span><span class="unit">°F</span>
+      </div>
+      <div class="station-row">
+        <span data-bind="s560.coverage">— observations on file</span>
+        <span data-bind="s560.range">—</span>
+      </div>
+    </div>
+    <div class="station-card station-264">
+      <div class="station-id">KALHUNTS264</div>
+      <div class="station-now">
+        <span class="num" data-bind="s264.temp">—</span><span class="unit">°F</span>
+      </div>
+      <div class="station-row">
+        <span data-bind="s264.coverage">— observations on file</span>
+        <span data-bind="s264.range">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="delta-banner">
+    <div>
+      <div class="label">Mean signed delta (560 − 264)</div>
+      <div class="value" data-bind="delta.mean">—</div>
+    </div>
+    <div>
+      <div class="label">Mean |delta|</div>
+      <div class="value" data-bind="delta.absMean">—</div>
+    </div>
+    <div>
+      <div class="label">σ</div>
+      <div class="value" data-bind="delta.stdev">—</div>
+    </div>
+    <div>
+      <div class="label">Paired samples</div>
+      <div class="value" data-bind="delta.n">—</div>
+    </div>
+  </div>
+
+  <div class="range-row">
+    <div class="range-buttons" role="tablist" aria-label="Time range">
+      <button class="range-btn" data-range="7d"  aria-pressed="false">7 days</button>
+      <button class="range-btn" data-range="30d" aria-pressed="true">30 days</button>
+      <button class="range-btn" data-range="90d" aria-pressed="false">90 days</button>
+      <button class="range-btn" data-range="1y"  aria-pressed="false">1 year</button>
+      <button class="range-btn" data-range="2y"  aria-pressed="false">2 years</button>
+    </div>
+    <span class="muted small font-mono" id="stations-range-meta"></span>
+  </div>
+
+  <div class="chart-wrap">
+    <canvas id="stationsChart" height="120"></canvas>
+  </div>
+
+  <div class="chart-wrap" style="margin-top:1.25rem">
+    <canvas id="deltaChart" height="80"></canvas>
+  </div>
+
+  <div class="analysis-section">
+    <h2 class="font-serif">So which one do we trust?</h2>
+    <p class="lede">
+      The two stations are <em>almost</em> the same place, so big systematic
+      deltas mean one is mis-sited or mis-calibrated. Small noisy deltas just
+      mean sensors disagree at the second-decimal level, which is fine.
+    </p>
+    <div class="verdict">
+      <h3>Verdict</h3>
+      <p data-bind="verdict.body">
+        Computing…
+      </p>
+    </div>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='stations.js') }}" defer></script>
+{% endblock %}

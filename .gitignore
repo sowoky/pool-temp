@@ -46,6 +46,9 @@ tools/gtsr1.pem
 .vscode/launch.json
 .vscode/ipch/
 
+# Playwright MCP screenshots + snapshots (local browsing sessions, not source)
+.playwright-mcp/
+
 # OS
 Thumbs.db
 .DS_Store

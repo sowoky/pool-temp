@@ -7,11 +7,15 @@ Resolves in priority order:
   3. OpenWeatherMap   (if OWM_API_KEY env set)
   4. NWS              (always available, no key; defaults to KHSV / Huntsville Intl)
 
-Each call returns (temp_f, source_name, station_id_or_None, raw_response_dict).
+Each `fetch_outdoor` call returns (temp_f, source_name, station_id, raw_response_dict).
+
+Also exposes historical-fetch helpers used by the backfill scripts and by the
+forecast/analysis pages.
 """
 
 import os
 import re
+from datetime import datetime, timezone
 from typing import Optional
 
 import requests
@@ -21,13 +25,17 @@ DEFAULT_LON = -86.5861
 DEFAULT_NWS_STATION = "KHSV"  # Huntsville International Airport (HSV)
 
 WU_KEY      = os.environ.get("WUNDERGROUND_API_KEY")
-# Comma-separated station IDs, tried in order. Both stations are near
-# Monte Sano in Huntsville AL; first one returning a valid temp wins.
 WU_STATIONS = [s.strip() for s in os.environ.get(
     "WUNDERGROUND_STATION_IDS", "KALHUNTS560,KALHUNTS264"
 ).split(",") if s.strip()]
 OWM_KEY     = os.environ.get("OWM_API_KEY")
 
+# Public key the wunderground.com dashboard widget uses. No signup; works
+# for any public PWS.
+PUBLIC_WU_KEY = "e1f10a1e78da46f5b10a1e78da96f525"
+
+
+# ---------------------------------------------------------------- live fetch
 
 def _try_wunderground() -> Optional[tuple]:
     if not WU_KEY:
@@ -54,12 +62,7 @@ def _try_wunderground() -> Optional[tuple]:
     return None
 
 
-PUBLIC_WU_KEY = "e1f10a1e78da46f5b10a1e78da96f525"
-
-
 def _try_wunderground_public() -> Optional[tuple]:
-    """Same v2 PWS endpoint, but with the anonymous key the wunderground.com
-    dashboard widget uses. No account needed; works for any public PWS."""
     if not WU_STATIONS:
         return None
     url = "https://api.weather.com/v2/pws/observations/current"
@@ -67,12 +70,8 @@ def _try_wunderground_public() -> Optional[tuple]:
         try:
             r = requests.get(
                 url,
-                params={
-                    "stationId": station,
-                    "format":    "json",
-                    "units":     "e",
-                    "apiKey":    PUBLIC_WU_KEY,
-                },
+                params={"stationId": station, "format": "json",
+                        "units": "e", "apiKey": PUBLIC_WU_KEY},
                 headers={"User-Agent": "Mozilla/5.0"},
                 timeout=10,
             )
@@ -93,12 +92,7 @@ def _try_openweather() -> Optional[tuple]:
     if not OWM_KEY:
         return None
     url = "https://api.openweathermap.org/data/2.5/weather"
-    params = {
-        "lat":   DEFAULT_LAT,
-        "lon":   DEFAULT_LON,
-        "units": "imperial",
-        "appid": OWM_KEY,
-    }
+    params = {"lat": DEFAULT_LAT, "lon": DEFAULT_LON, "units": "imperial", "appid": OWM_KEY}
     try:
         r = requests.get(url, params=params, timeout=10)
         r.raise_for_status()
@@ -144,8 +138,6 @@ def fetch_outdoor() -> Optional[tuple]:
 # ---------- helpers for the hourly historical log ----------
 
 def fetch_pws_single(station_id: str) -> Optional[float]:
-    """Fetch the current temp_f from one specific Wunderground PWS via the
-    same anonymous key the dashboard widget uses. Returns None on any error."""
     url = "https://api.weather.com/v2/pws/observations/current"
     try:
         r = requests.get(
@@ -163,10 +155,6 @@ def fetch_pws_single(station_id: str) -> Optional[float]:
 
 
 _CLUB_POOL_URL = "https://www.montesanoclub.org/pool"
-# Page is server-rendered Next.js. The temp ends up as literal markup like
-#   Pool temperature</p><p class="...">72.0<!-- -->°F</p>
-# with the actual U+00B0 char (not an escape). Find the first numeric value
-# after "Pool temperature".
 _CLUB_POOL_TEMP_RE = re.compile(
     r"Pool temperature.{0,400}?(?P<temp>\d{1,3}\.\d{1,3})\s*(?:<!--[^>]*-->\s*)?°F",
     re.S,
@@ -177,8 +165,6 @@ _CLUB_POOL_AGE_RE = re.compile(
 
 
 def fetch_club_pool_temp() -> tuple[Optional[float], Optional[int]]:
-    """Scrape the water temp + 'last updated X ago' age (in seconds) from the
-    public club site. Returns (temp_f, age_seconds) or (None, None) on failure."""
     try:
         r = requests.get(_CLUB_POOL_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
         r.raise_for_status()
@@ -201,6 +187,91 @@ def fetch_club_pool_temp() -> tuple[Optional[float], Optional[int]]:
     return temp_f, age_s
 
 
-# Stations explicitly logged in the hourly historical record. Both are on
-# Monte Sano in Huntsville. Keep order stable so column names stay meaningful.
 HOURLY_PWS_STATIONS = ("KALHUNTS560", "KALHUNTS264")
+
+
+# ---------------------------------------------------------------- history
+
+def fetch_pws_history_day(station_id: str, date_yyyymmdd: str) -> Optional[dict]:
+    """Pull one day of 5-minute observations from WU history/all.
+
+    `date_yyyymmdd` is the UTC-ish day key WU expects (e.g. "20260101").
+    Returns the raw JSON, or None on failure. Caller is responsible for
+    iterating obs and inserting via db.insert_pws_observation.
+    """
+    url = "https://api.weather.com/v2/pws/history/all"
+    try:
+        r = requests.get(
+            url,
+            params={
+                "stationId": station_id,
+                "format":    "json",
+                "units":     "e",
+                "date":      date_yyyymmdd,
+                "apiKey":    PUBLIC_WU_KEY,
+                "numericPrecision": "decimal",
+            },
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept":     "application/json",
+                "Origin":     "https://www.wunderground.com",
+                "Referer":    "https://www.wunderground.com/",
+            },
+            timeout=20,
+        )
+        if r.status_code == 204:
+            return {"observations": []}
+        r.raise_for_status()
+        return r.json()
+    except (requests.RequestException, ValueError) as e:
+        print(f"[history] wu {station_id} {date_yyyymmdd} failed: {e}")
+        return None
+
+
+def fetch_nws_observations_range(station_id: str, since: datetime) -> list[dict]:
+    """Pull the most-recent week-ish of observations from NWS for one station.
+
+    NWS only keeps about a week of observations via this endpoint. For deeper
+    history use synoptic/api.synopticdata.com (out of scope for now)."""
+    url = f"https://api.weather.gov/stations/{station_id}/observations"
+    headers = {
+        "User-Agent": "pool-temp-monitor (kyleroden@gmail.com)",
+        "Accept":     "application/geo+json",
+    }
+    params = {"start": since.astimezone(timezone.utc).isoformat(timespec="seconds")}
+    try:
+        r = requests.get(url, headers=headers, params=params, timeout=20)
+        r.raise_for_status()
+        feats = r.json().get("features") or []
+        out = []
+        for f in feats:
+            props = f.get("properties") or {}
+            ts = props.get("timestamp")
+            if ts:
+                out.append({"ts": ts, "props": props})
+        return out
+    except (requests.RequestException, ValueError, KeyError) as e:
+        print(f"[history] nws {station_id} failed: {e}")
+        return []
+
+
+# ---------------------------------------------------------------- nws forecast
+
+def fetch_nws_forecast() -> Optional[dict]:
+    """Returns the NWS gridpoint forecast for KHSV's gridpoint as a dict with
+    a `periods` list. Each period has `name`, `startTime`, `endTime`, `temperature`, etc."""
+    points_url = f"https://api.weather.gov/points/{DEFAULT_LAT},{DEFAULT_LON}"
+    headers = {
+        "User-Agent": "pool-temp-monitor (kyleroden@gmail.com)",
+        "Accept":     "application/geo+json",
+    }
+    try:
+        r = requests.get(points_url, headers=headers, timeout=10)
+        r.raise_for_status()
+        forecast_url = r.json()["properties"]["forecast"]
+        r2 = requests.get(forecast_url, headers=headers, timeout=10)
+        r2.raise_for_status()
+        return r2.json().get("properties")
+    except (requests.RequestException, ValueError, KeyError) as e:
+        print(f"[forecast] nws failed: {e}")
+        return None

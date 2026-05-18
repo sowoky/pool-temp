@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Prophecy — Monte Sano Observatory{% endblock %}
+{% set active = 'forecast' %}
+
+{% block content %}
+
+<section class="forecast-page">
+
+  <div class="sigil-hero">
+    <span class="occult-eyebrow">· Novus Ordo Aquarum ·</span>
+
+    <!-- Eye of Providence — inline SVG so it inherits text color -->
+    <svg class="eye-of-providence" viewBox="0 0 200 180" fill="none" aria-hidden="true">
+      <!-- triangle -->
+      <path d="M100 14 L188 162 L12 162 Z"
+            stroke="#d4b75e" stroke-width="2.2" fill="rgba(212,183,94,.04)"/>
+      <!-- rays -->
+      <g stroke="#d4b75e" stroke-width="1" opacity=".5">
+        <line x1="100" y1="6"   x2="100" y2="-20"/>
+        <line x1="36"  y1="82"  x2="10"  y2="64"/>
+        <line x1="164" y1="82"  x2="190" y2="64"/>
+        <line x1="60"  y1="36"  x2="40"  y2="14"/>
+        <line x1="140" y1="36"  x2="160" y2="14"/>
+        <line x1="80"  y1="22"  x2="68"  y2="-2"/>
+        <line x1="120" y1="22"  x2="132" y2="-2"/>
+      </g>
+      <!-- eye -->
+      <path d="M62 100 Q100 70 138 100 Q100 130 62 100 Z"
+            stroke="#d4b75e" stroke-width="2" fill="rgba(212,183,94,.08)"/>
+      <circle cx="100" cy="100" r="12" fill="#d4b75e"/>
+      <circle cx="100" cy="100" r="5"  fill="#02090d"/>
+      <!-- lower trigram -->
+      <g stroke="#d4b75e" stroke-width="1.4" opacity=".75">
+        <line x1="78"  y1="140" x2="122" y2="140"/>
+        <line x1="84"  y1="148" x2="116" y2="148"/>
+        <line x1="92"  y1="156" x2="108" y2="156"/>
+      </g>
+    </svg>
+
+    <h1>The Mountain Doesn't Get the Huntsville Forecast</h1>
+    <p class="dim" style="max-width: 38rem; margin: 1rem auto 0;">
+      KHSV gives us a temperature forecast for the valley.
+      We correct it for the ridge, then translate ridge air into pool water.
+      <br><span class="font-mono" style="font-size:.78rem; color: var(--rune-gold)">obscure auguries · refined by data · all readings provisional</span>
+    </p>
+    <div class="rune-row">⛤ ☉ △ ☽ ⚯</div>
+  </div>
+
+  <div class="prophecy-grid">
+    <div class="prophecy-card">
+      <div class="prophecy-eyebrow">As Below — Pool</div>
+      <p class="prophecy-title">Water tomorrow</p>
+      <span class="prophecy-value" data-bind="prophecy.poolTomorrow">—</span>
+      <span class="prophecy-sub" data-bind="prophecy.poolSub">computing…</span>
+    </div>
+    <div class="prophecy-card">
+      <div class="prophecy-eyebrow">As Above — Air</div>
+      <p class="prophecy-title">Monte Sano air tomorrow</p>
+      <span class="prophecy-value" data-bind="prophecy.airTomorrow">—</span>
+      <span class="prophecy-sub" data-bind="prophecy.airSub">computing…</span>
+    </div>
+  </div>
+
+  <div class="analysis-section">
+    <h2 class="font-serif">Period by period</h2>
+    <p class="lede">
+      NWS gives us 12-hour-ish periods. For each one we show the official
+      Huntsville-valley number, then our corrected Monte Sano number, then the
+      pool we expect.
+    </p>
+    <div class="chart-wrap" style="margin-top: .8rem;">
+      <canvas id="prophecyChart" height="110"></canvas>
+    </div>
+    <div id="periodsTable" class="font-mono" style="margin-top:1.4rem;"></div>
+  </div>
+
+  <div class="method-section">
+    <h3>How this is calculated</h3>
+    <ul>
+      <li><strong>Step 1</strong> — pull NWS gridpoint forecast for KHSV (the valley).</li>
+      <li><strong>Step 2</strong> — apply the Monte Sano correction:
+        <code data-bind="method.offset">offset = —</code>
+        (source <span data-bind="method.offsetSrc">—</span>,
+         sample size <span data-bind="method.offsetN">—</span>).</li>
+      <li><strong>Step 3</strong> — chain forward through each period using a thermal-lag model:
+        <code>pool[next] = pool[now] + k·(air[next] − pool[now])</code>,
+        with <code data-bind="method.k">k = —</code>
+        (source <span data-bind="method.kSrc">—</span>,
+         sample size <span data-bind="method.kN">—</span>).</li>
+    </ul>
+    <p class="muted small" style="margin-top:.8rem;">
+      Confidence is low. The ridge offset will collapse from "default" to "fit" once we have
+      a few weeks of paired PWS-vs-KHSV data. The pool k value is currently fit from very
+      limited water history (probe came online recently) and will sharpen with every passing day.
+    </p>
+  </div>
+
+</section>
+
+{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='forecast.js') }}" defer></script>
+{% endblock %}

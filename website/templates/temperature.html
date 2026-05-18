@@ -1,30 +1,28 @@
 {% extends "base.html" %}
-{% block title %}Pool Temperature &mdash; Monte Sano Club{% endblock %}
+{% block title %}Pool &amp; Air History — Monte Sano Observatory{% endblock %}
+{% set active = 'temp' %}
 
 {% block content %}
 
 <section class="page-hero">
   <div class="page-hero-inner">
     <h1>
-      <span class="hero-pretitle">Live conditions</span>
-      <span class="hero-title">Pool &amp; Air Temperature</span>
+      <span class="hero-pretitle">Observation</span>
+      <span class="hero-title">Pool &amp; Air History</span>
     </h1>
-    <p class="hero-lead">Water reads every sixty seconds from the filter return line. Air reads from a Wunderground station up the ridge.</p>
+    <p class="hero-lead">Water reads every sixty seconds from the filter return line. Air follows the first responding PWS on the ridge, falling back to KHSV.</p>
   </div>
-  <svg class="hero-wave" viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
-    <path fill="#f4f1ed" d="M0,40 C240,80 480,0 720,40 C960,80 1200,0 1440,40 L1440,100 L0,100 Z"></path>
-  </svg>
 </section>
 
 <section class="temp-page">
   <div class="temp-strip-inner">
     <div class="temp-card temp-card-pool">
-      <span class="temp-label">Pool</span>
+      <span class="temp-label"><span class="live-pulse"></span>Pool water</span>
       <span class="temp-value" data-bind="pool.temp">&mdash;</span>
       <span class="temp-meta" data-bind="pool.meta">Waiting for a reading&hellip;</span>
     </div>
     <div class="temp-card temp-card-air">
-      <span class="temp-label">Outdoor Air</span>
+      <span class="temp-label"><span class="live-pulse"></span>Outdoor air</span>
       <span class="temp-value" data-bind="outdoor.temp">&mdash;</span>
       <span class="temp-meta" data-bind="outdoor.meta">Waiting for a reading&hellip;</span>
     </div>
@@ -32,11 +30,11 @@
 
   <div class="range-row">
     <div class="range-buttons" role="tablist" aria-label="Time range">
-      <button class="range-btn" data-range="24h" aria-pressed="true">Last 24 hours</button>
-      <button class="range-btn" data-range="7d"  aria-pressed="false">Last 7 days</button>
-      <button class="range-btn" data-range="30d" aria-pressed="false">Last 30 days</button>
+      <button class="range-btn" data-range="24h" aria-pressed="true">24 hours</button>
+      <button class="range-btn" data-range="7d"  aria-pressed="false">7 days</button>
+      <button class="range-btn" data-range="30d" aria-pressed="false">30 days</button>
     </div>
-    <span class="muted small" id="range-meta"></span>
+    <span class="muted small font-mono" id="range-meta"></span>
   </div>
 
   <div class="chart-wrap">
