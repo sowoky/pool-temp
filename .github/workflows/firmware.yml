@@ -126,7 +126,7 @@ jobs:
 
       - name: Build firmware
         id: build
-        if: steps.gate.outputs.already == 'false'
+        if: steps.gate.outputs.already == 'false' && steps.provision.outcome == 'success'
         run: |
           set -o pipefail
           pio run -v -e esp32dev 2>&1 | tee /tmp/pio-build.log
