@@ -80,8 +80,20 @@ jobs:
           key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
 
       - name: Build firmware
+        id: build
         if: steps.gate.outputs.already == 'false'
-        run: pio run -e esp32dev
+        run: |
+          set -o pipefail
+          pio run -v -e esp32dev 2>&1 | tee /tmp/pio-build.log
+
+      - name: Upload build log on failure
+        if: always() && steps.gate.outputs.already == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pio-build-log
+          path: /tmp/pio-build.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Stage binary + manifest
         if: steps.gate.outputs.already == 'false'
