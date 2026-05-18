@@ -15,11 +15,14 @@ on:
   push:
     branches: [main]
     # Don't loop on our own commit-back (that commit only touches
-    # website/static/firmware/) and don't run for unrelated edits.
+    # website/static/firmware/ or ci-debug/) and don't run for unrelated edits.
     paths:
       - 'src/**'
       - 'platformio.ini'
       - '.github/workflows/firmware.yml'
+    paths-ignore:
+      - 'ci-debug/**'
+      - 'website/static/firmware/**'
   workflow_dispatch: {}     # manual trigger from the Actions tab
 
 permissions:
@@ -94,6 +97,22 @@ jobs:
           path: /tmp/pio-build.log
           if-no-files-found: ignore
           retention-days: 7
+
+      # Public-readable fallback: artifact downloads need auth even on public
+      # repos, so on build failure also commit the log to ci-debug/ on main.
+      # Path filter excludes ci-debug/ from triggering, so no recursive runs.
+      - name: Commit build log on failure (public via raw GitHub)
+        if: failure() && steps.build.outcome == 'failure'
+        run: |
+          if [ ! -f /tmp/pio-build.log ]; then exit 0; fi
+          mkdir -p ci-debug
+          cp /tmp/pio-build.log "ci-debug/build-failure-${{ steps.ver.outputs.version }}-${{ github.run_id }}.log"
+          cp /tmp/pio-build.log "ci-debug/last-failure.log"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ci-debug/
+          git commit -m "ci: capture build failure ${{ steps.ver.outputs.version }} (run ${{ github.run_id }})"
+          git push
 
       - name: Stage binary + manifest
         if: steps.gate.outputs.already == 'false'
