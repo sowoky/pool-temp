@@ -1,0 +1,144 @@
+name: firmware build
+
+# Build the ESP32 firmware when source changes. Reads FW_VERSION from
+# src/main.cpp; if the matching binary isn't already in the repo, builds
+# it, commits firmware-<VERSION>.bin + an updated latest.json back to main,
+# and creates a GitHub Release v<VERSION> with the .bin attached.
+#
+# Devices follow the committed latest.json on raw.githubusercontent.com and
+# pull the committed firmware-<VERSION>.bin from the same place. The release
+# is human-facing — changelog + download UI — not what the device fetches.
+#
+# To cut a release: bump FW_VERSION in src/main.cpp, commit, push.
+
+on:
+  push:
+    branches: [main]
+    # Don't loop on our own commit-back (that commit only touches
+    # website/static/firmware/) and don't run for unrelated edits.
+    paths:
+      - 'src/**'
+      - 'platformio.ini'
+      - '.github/workflows/firmware.yml'
+  workflow_dispatch: {}     # manual trigger from the Actions tab
+
+permissions:
+  contents: write           # needs to commit the .bin + create the release
+
+concurrency:
+  group: firmware-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need full history so we can commit back without a shallow clone.
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Read FW_VERSION from src/main.cpp
+        id: ver
+        run: |
+          v=$(grep -oP 'FW_VERSION\s*=\s*"\K[^"]+' src/main.cpp)
+          if [ -z "$v" ]; then
+            echo "::error::could not parse FW_VERSION from src/main.cpp"; exit 1
+          fi
+          echo "version=$v"            >> "$GITHUB_OUTPUT"
+          echo "bin_name=firmware-$v.bin" >> "$GITHUB_OUTPUT"
+
+      - name: Check if this version is already published
+        id: gate
+        run: |
+          if [ -f "website/static/firmware/${{ steps.ver.outputs.bin_name }}" ]; then
+            echo "already=true"  >> "$GITHUB_OUTPUT"
+            echo "FW_VERSION ${{ steps.ver.outputs.version }} already published; skipping build."
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.gate.outputs.already == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        if: steps.gate.outputs.already == 'false'
+        run: pip install --upgrade platformio
+
+      - name: Cache PlatformIO packages
+        if: steps.gate.outputs.already == 'false'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Build firmware
+        if: steps.gate.outputs.already == 'false'
+        run: pio run -e esp32dev
+
+      - name: Stage binary + manifest
+        if: steps.gate.outputs.already == 'false'
+        env:
+          VERSION:  ${{ steps.ver.outputs.version }}
+          BIN_NAME: ${{ steps.ver.outputs.bin_name }}
+        run: |
+          mkdir -p website/static/firmware
+          cp .pio/build/esp32dev/firmware.bin "website/static/firmware/$BIN_NAME"
+          size=$(stat -c%s "website/static/firmware/$BIN_NAME")
+          released_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          cat > website/static/firmware/latest.json <<JSON
+          {
+            "version": "$VERSION",
+            "url": "https://raw.githubusercontent.com/${{ github.repository }}/main/website/static/firmware/$BIN_NAME",
+            "size_bytes": $size,
+            "released_at": "$released_at",
+            "notes": "Built by GitHub Actions from ${{ github.sha }}"
+          }
+          JSON
+          echo "--- latest.json ---"
+          cat website/static/firmware/latest.json
+
+      - name: Commit binary + manifest back to main
+        if: steps.gate.outputs.already == 'false'
+        env:
+          VERSION:  ${{ steps.ver.outputs.version }}
+          BIN_NAME: ${{ steps.ver.outputs.bin_name }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "website/static/firmware/$BIN_NAME" website/static/firmware/latest.json
+          if git diff --staged --quiet; then
+            echo "Nothing to commit (binary may match an existing build)."
+          else
+            git commit -m "ci: publish firmware $VERSION
+
+          Built from ${GITHUB_SHA::10}. See release v$VERSION for changelog."
+            git push
+          fi
+
+      - name: Create GitHub Release
+        if: steps.gate.outputs.already == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION:  ${{ steps.ver.outputs.version }}
+          BIN_NAME: ${{ steps.ver.outputs.bin_name }}
+        run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists; skipping create."
+            exit 0
+          fi
+          gh release create "v$VERSION" \
+            "website/static/firmware/$BIN_NAME" \
+            --title "firmware $VERSION" \
+            --notes "ESP32 firmware $VERSION
+
+          Binary committed at \`website/static/firmware/$BIN_NAME\`. Devices
+          pick this up automatically via the \`latest.json\` manifest on
+          \`raw.githubusercontent.com\`."
