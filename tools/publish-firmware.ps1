@@ -48,7 +48,9 @@ $binVersioned = Join-Path $FwDir "firmware-$version.bin"
 Copy-Item $binSrc $binVersioned -Force
 $binSize = (Get-Item $binVersioned).Length
 
-# 4. Manifest. Hand-rolled so we don't pick up PowerShell's UTF-8 BOM nonsense.
+# 4. Manifest. Must be BOM-free — ArduinoJson on the device chokes on the
+# Windows-PowerShell UTF-8 BOM that `Set-Content -Encoding utf8` writes
+# under PS 5.1. Use .NET directly so the file starts with `{`, not `EF BB BF`.
 $releasedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 $notesEsc   = ($Notes -replace '"', '\"')
 $manifestJson = @"
@@ -60,7 +62,7 @@ $manifestJson = @"
   "notes": "$notesEsc"
 }
 "@
-Set-Content -Path $Manifest -Value $manifestJson -Encoding utf8
+[System.IO.File]::WriteAllText($Manifest, $manifestJson, [System.Text.UTF8Encoding]::new($false))
 Write-Host "manifest:"
 Get-Content $Manifest
 
