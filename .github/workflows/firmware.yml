@@ -14,15 +14,14 @@ name: firmware build
 on:
   push:
     branches: [main]
-    # Don't loop on our own commit-back (that commit only touches
-    # website/static/firmware/ or ci-debug/) and don't run for unrelated edits.
+    # Only trigger when something that actually affects the build changes.
+    # Implicitly excludes our own commit-backs (website/static/firmware/**,
+    # ci-debug/**) because neither matches these globs. GitHub rejects the
+    # run if you specify both `paths` and `paths-ignore`, so don't.
     paths:
       - 'src/**'
       - 'platformio.ini'
       - '.github/workflows/firmware.yml'
-    paths-ignore:
-      - 'ci-debug/**'
-      - 'website/static/firmware/**'
   workflow_dispatch: {}     # manual trigger from the Actions tab
 
 permissions:
