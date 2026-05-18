@@ -15,7 +15,7 @@
 
 // Bumped per release. Self-update only fires when the manifest advertises
 // a string different from this one.
-static const char* FW_VERSION = "1.1.0";
+static const char* FW_VERSION = "1.1.1";
 
 // Hardware-fixed; not in NVS.
 static const uint8_t  ONEWIRE_PIN     = 13;
@@ -208,6 +208,7 @@ static void checkForUpdate() {
   }
   http.setConnectTimeout(10000);
   http.setTimeout(15000);
+  http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
   int code = http.GET();
   if (code != 200) {
     String result = "manifest HTTP " + String(code);
@@ -281,6 +282,17 @@ void setup() {
   Serial.printf("=== pool-temp boot (fw %s) ===\n", FW_VERSION);
 
   loadConfig(g_config);
+
+  // One-shot migration: the old Caddy host (temp.kyro-labs.com) was decommissioned,
+  // so devices upgrading from 1.0.x / 1.1.0 have a dead manifest URL in NVS. Detect
+  // and rewrite to the GitHub raw URL we use going forward. Idempotent on later boots.
+  if (g_config.update_manifest_url.indexOf("temp.kyro-labs.com") >= 0) {
+    g_config.update_manifest_url = "https://raw.githubusercontent.com/sowoky/pool-temp/main/website/static/firmware/latest.json";
+    g_config.auto_update_enabled = true;
+    saveConfig(g_config);
+    Serial.println("[migrate] update_manifest_url: kyro-labs -> github raw; auto-update re-enabled");
+  }
+
   Serial.printf("[cfg] endpoint_1=%s\n", g_config.endpoint_1.c_str());
   Serial.printf("[cfg] endpoint_2=%s\n", g_config.endpoint_2.c_str());
   Serial.printf("[cfg] sample_ms=%lu  bounds=[%.1f, %.1f]  label=%s\n",

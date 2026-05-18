@@ -24,7 +24,7 @@ void loadConfig(PoolConfig& cfg) {
   cfg.device_label      = p.getString("dev_label",   "pool-equip-shed");
 
   cfg.auto_update_enabled    = p.getBool  ("au_enabled", true);
-  cfg.update_manifest_url    = p.getString("au_url",     "https://temp.kyro-labs.com/static/firmware/latest.json");
+  cfg.update_manifest_url    = p.getString("au_url",     "https://raw.githubusercontent.com/sowoky/pool-temp/main/website/static/firmware/latest.json");
   cfg.update_check_period_ms = p.getUInt  ("au_period",  3600000UL);   // 1h
   p.end();
 }
