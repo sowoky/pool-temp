@@ -15,7 +15,7 @@
 
 // Bumped per release. Self-update only fires when the manifest advertises
 // a string different from this one.
-static const char* FW_VERSION = "1.1.2";
+static const char* FW_VERSION = "1.1.3";
 
 // Hardware-fixed; not in NVS.
 static const uint8_t  ONEWIRE_PIN     = 13;
