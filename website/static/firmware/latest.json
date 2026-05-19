@@ -1,7 +1,7 @@
 {
-  "version": "1.1.2",
-  "url": "https://raw.githubusercontent.com/sowoky/pool-temp/main/website/static/firmware/firmware-1.1.2.bin",
-  "size_bytes": 1040128,
-  "released_at": "2026-05-18T23:39:54Z",
-  "notes": "End-to-end auto-update verification build. No functional changes vs 1.1.1."
+  "version": "1.1.3",
+  "url": "https://raw.githubusercontent.com/sowoky/pool-temp/main/website/static/firmware/firmware-1.1.3.bin",
+  "size_bytes": 1057632,
+  "released_at": "2026-05-19T00:03:56Z",
+  "notes": "Built by GitHub Actions from c630334d869501a523e82682b04350c4811df82b"
 }
