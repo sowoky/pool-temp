@@ -30,6 +30,14 @@ That's it. The device gets the new firmware in ≤ 1 hour without you touching i
 The device follows the URL string inside the manifest, so we can move the
 binary to a different host any time by editing only the manifest.
 
+> **Repo landmine — do NOT rename, move, delete, or make private the
+> `sowoky/pool-temp` GitHub repo.** Every fielded device polls
+> `raw.githubusercontent.com/sowoky/pool-temp/main/.../latest.json` hourly
+> and reflashes from it. Changing the repo path or visibility makes that URL
+> 404, which silently bricks the auto-update path on every device in the
+> field. If the repo must move, first ship a firmware release that repoints
+> `au_url` to the new manifest location and confirm devices have taken it.
+
 ## One-time setup: GitHub Secrets
 
 `src/secrets.h` (WiFi credentials) is gitignored, so the CI runner has no

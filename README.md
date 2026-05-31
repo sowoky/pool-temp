@@ -54,17 +54,19 @@ stagnates).
                                     |  X-API-Key: <key>     |
                                     +-----------------------+
                                        ^
-                            JSON every 60s; falls over
-                            to a secondary URL on non-2xx
+                            JSON every 60s, POSTed to BOTH
+                            endpoint_1 and endpoint_2 independently
 ```
 
 ### Firmware: `src/main.cpp`
 
 Reads up to 8 DS18B20 sensors on the bus, scans for one of two known WiFi
 networks at boot (a home / dev SSID and the pool's public SSID), and POSTs
-JSON to a configurable endpoint every minute. Bounds-checks every reading and
-rejects `DEVICE_DISCONNECTED_F`. Reconnects WiFi on drops. Serial debug at
-115200 baud.
+JSON to TWO configurable endpoints every minute — `endpoint_1` and
+`endpoint_2` each get the same payload, independently (no primary→fallback
+cascade; a non-2xx on one does not affect the other, and a blank endpoint is
+skipped). Bounds-checks every reading and rejects `DEVICE_DISCONNECTED_F`.
+Reconnects WiFi on drops. Serial debug at 115200 baud.
 
 POST payload shape:
 
@@ -74,9 +76,14 @@ POST payload shape:
     {"addr": "28XXXXXXXXXXXXE5", "temp_f": 78.5},
     {"addr": "28YYYYYYYYYYYYE6", "temp_f": 78.6}
   ],
-  "temp_f": 78.5
+  "temp_f": 78.5,
+  "fw": "1.1.3",
+  "label": "pool-equip-shed"
 }
 ```
+
+`fw` is the running firmware version; `label` is the device label (omitted
+when blank).
 
 `temp_f` at the top level is the "primary" reading (whichever sensor
 enumerated first, unless you pin a specific ROM address via `primary_addr`).
@@ -94,22 +101,37 @@ This keeps the firmware compatible with whatever CA the receiver chooses
 without us having to maintain a root store on the ESP32. ALPN is set to
 `http/1.1` so CDNs / ngrok edges that require it don't drop the handshake.
 
-**Runtime config (NVS, see `src/config.cpp`):**
+**Runtime config (NVS, see `src/config.cpp`).** The struct fields are
+`endpoint_1` / `endpoint_2`; the on-disk NVS keys are the legacy
+`ep_primary` / `ep_fallback` (kept for upgrade compatibility — both are now
+"always send" endpoints, not a cascade).
 
-| Key | Default | Purpose |
+| NVS key | Default | Purpose |
 |---|---|---|
-| `endpoint_primary` | `http://montesanoclub.org/temps/update` | first URL tried |
-| `endpoint_fallback` | `https://niece-tweet-flame.ngrok-free.dev/reading` | retried on non-2xx |
+| `ep_primary` (`endpoint_1`) | `https://www.montesanoclub.org/temps/update` | first endpoint, POSTed every cycle |
+| `ep_fallback` (`endpoint_2`) | `https://temp.kyro-labs.com/reading` | second endpoint, POSTed every cycle (blank = skip) |
 | `api_key` | `dev-key` | `X-API-Key` value |
-| `sample_period_ms` | `60000` | how often we sample + POST |
-| `min_valid_f` / `max_valid_f` | `0.0` / `130.0` | bounds-reject before sending |
-| `primary_addr` | `""` | ROM address of the "authoritative" sensor (optional) |
-| `device_label` | `pool-equip-shed` | tag included in payload |
-| `admin_user` / `admin_pass` | `admin` / `changeme` | basic auth for the device's web UI |
-| `ota_password` | `pool-ota` | ArduinoOTA auth |
+| `sample_ms` | `60000` | how often we sample + POST |
+| `min_f` / `max_f` | `0.0` / `130.0` | bounds-reject before sending |
+| `primary` (`primary_addr`) | `""` | ROM address of the "authoritative" sensor (optional) |
+| `dev_label` (`device_label`) | `pool-equip-shed` | tag included in payload (`label`) |
+| `au_user` / `au_pass` | `admin` / `changeme` | basic auth for the device's web UI |
+| `ota_pass` (`ota_password`) | `pool-ota` | ArduinoOTA auth |
+| `au_enabled` | `true` | enable hourly self-update poll |
+| `au_url` (`update_manifest_url`) | GitHub raw `latest.json` | manifest the device polls |
+| `au_period` (`update_check_period_ms`) | `3600000` | self-update poll interval (ms, 1h) |
 
-Endpoint contract (what the receiver needs to accept) is in
+Endpoint contract (what each receiver needs to accept) is in
 `docs/server-endpoint-spec.md`.
+
+### Self-update (OTA over HTTPS)
+
+`checkForUpdate()` polls the `au_url` manifest hourly. If the manifest's
+`version` differs from the running `FW_VERSION`, the device downloads the
+binary URL it advertises and reflashes via `httpUpdate` (reboots on
+success). Toggle with `au_enabled`; tune the cadence with `au_period`. The
+full release pipeline (GitHub Actions → `latest.json` → device) is in
+`docs/firmware-releases.md`.
 
 ### On-device admin web UI
 
@@ -139,9 +161,9 @@ pio run -e esp32dev -t upload -t monitor
 You should see:
 
 ```
-=== pool-temp boot ===
-[cfg] primary=...
-[cfg] fallback=...
+=== pool-temp boot (fw 1.1.3) ===
+[cfg] endpoint_1=...
+[cfg] endpoint_2=...
 [1wire] DS18B20 devices found: N
   [0] 28...E5
 [wifi] scanning...
@@ -168,8 +190,8 @@ GPIO 13 wire. If two sensors enumerate but their readings disagree by
 | `monitor.ps1` | open the serial monitor at 115200 |
 | `chip-id.ps1` | read MAC + chip rev |
 | `show-config.py` | scrape current NVS config + telemetry from the device admin page |
-| `update-endpoints.py` | push new primary/fallback URLs to the device, then poll a local API for a fresh sample as confirmation |
-| `update-fallback.py` | same idea, fallback-only |
+| `update-endpoints.py` | push new `endpoint_1`/`endpoint_2` URLs to the device, then poll a local API for a fresh sample as confirmation |
+| `update-fallback.py` | same idea, `endpoint_2`-only |
 | `tcp-probe.py` | TCP sanity check against a host/port |
 | `disable-services.ps1` | one-time cleanup (elevated) — stops & disables `PoolTempCaddy`, removes the firewall rules for 80/443. Safe to run again; idempotent. |
 

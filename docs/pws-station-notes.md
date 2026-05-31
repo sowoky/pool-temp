@@ -15,15 +15,15 @@ us:
 
 ## How to backfill / refresh
 
-```powershell
+```bash
 # 30 days of 5-minute observations for both stations
-.\website\.venv\Scripts\python.exe tools\backfill-pws-history.py --days 30
+python tools/backfill-pws-history.py --days 30
 
 # A year, resuming any already-stored days
-.\website\.venv\Scripts\python.exe tools\backfill-pws-history.py --days 365 --resume
+python tools/backfill-pws-history.py --days 365 --resume
 
 # Quick console summary of the delta after backfill
-.\website\.venv\Scripts\python.exe tools\analyze-stations.py
+python tools/analyze-stations.py
 ```
 
 `backfill-pws-history.py` uses the same anonymous WU dashboard key that

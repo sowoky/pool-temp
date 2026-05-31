@@ -6,10 +6,12 @@ needs to do to accept it.
 
 ## TL;DR
 
-A small ESP32 in the pool equipment shed POSTs a JSON body to a single URL
-every 60 seconds. If the server returns any 2xx, the firmware considers the
-reading delivered. Anything else, the firmware fails over to its backup URL
-and tries again. So the only thing the server needs to do correctly:
+A small ESP32 in the pool equipment shed POSTs a JSON body every 60 seconds.
+It sends the same payload to TWO endpoints independently every cycle — there
+is no primary→fallback cascade; whether your endpoint gets the reading does
+not depend on the other endpoint. If your server returns any 2xx, the
+firmware considers your copy delivered. So the only thing your server needs
+to do correctly:
 
 - accept `POST <your URL>`
 - validate the `X-API-Key` header
@@ -22,7 +24,7 @@ and tries again. So the only thing the server needs to do correctly:
 | | |
 |---|---|
 | Method | `POST` |
-| URL (preferred) | `http://montesanoclub.org/temps/update` |
+| URL (montesanoclub) | `https://www.montesanoclub.org/temps/update` |
 | Content-Type | `application/json` |
 | Authentication | header `X-API-Key: dev-key` |
 | Body | see below |
@@ -41,7 +43,9 @@ know the new value and I&rsquo;ll update the firmware in step.
     {"addr": "280D0E8A060000E5", "temp_f": 78.42},
     {"addr": "288D578B060000E6", "temp_f": 78.51}
   ],
-  "temp_f": 78.42
+  "temp_f": 78.42,
+  "fw": "1.1.3",
+  "label": "pool-equip-shed"
 }
 ```
 
@@ -56,6 +60,8 @@ Field reference:
     into each chip at the factory). Use this to tell sensors apart if we
     ever instrument more than one location.
   - `temp_f`: that sensor&rsquo;s reading in Fahrenheit.
+- `fw`: the device&rsquo;s running firmware version string (e.g. `1.1.3`).
+- `label`: the device label (e.g. `pool-equip-shed`); omitted when blank.
 
 The firmware bounds-checks readings between 0&deg;F and 130&deg;F before
 sending. You won&rsquo;t see disconnected-sensor values (`-127`) or
@@ -68,7 +74,8 @@ absurdities in the payload.
 - If JSON parse fails: reject with `400`.
 - Otherwise persist (timestamp it server-side) and return `200`.
 
-Returning `4xx`/`5xx` makes the firmware fail over to its backup URL, so
+Returning `4xx`/`5xx` just means your copy of that reading is lost (the
+firmware does not retry within the cycle — the next sample is 60s away), so
 correctness matters more than performance &mdash; it&rsquo;s better to take
 500ms and return `200` than to return `503` because the DB is slow.
 
@@ -93,34 +100,26 @@ CREATE TABLE pool_sensor_readings (
 Keep the raw JSON. The firmware payload may grow (humidity, pump-status,
 etc.) and you don&rsquo;t want to keep migrating columns.
 
-## Failover behavior (FYI, you don&rsquo;t have to handle it)
+## Dual-delivery behavior (FYI, you don&rsquo;t have to handle it)
 
-The firmware tries this list in order:
+The firmware POSTs the same payload, with the same `X-API-Key` header, to
+two endpoints every cycle, independently:
 
-1. `http://montesanoclub.org/temps/update`  &larr; you
-2. `https://niece-tweet-flame.ngrok-free.dev/reading`  &larr; my fallback
+1. `https://www.montesanoclub.org/temps/update`  &larr; you
+2. `https://temp.kyro-labs.com/reading`  &larr; my second receiver
 
-Both addresses receive the same payload with the same `X-API-Key` header.
-Once your endpoint returns 2xx reliably, the fallback never gets hit.
-
-I can pull the fallback out of the firmware entirely once we&rsquo;re
-confident yours is solid. Not urgent.
+There is no &ldquo;primary then fallback&rdquo; ordering &mdash; both always
+get every reading, and a non-2xx from one has no effect on the other. So you
+never need to think about the other endpoint; just accept your POSTs and
+return 2xx.
 
 ## Frequency &amp; volume
 
 - 1 POST per minute, 24/7 &asymp; 43,200 POSTs / month
 - Payload size &lt; 200 bytes per request
-- No bursts, no retries beyond the failover step (next sample is in 60s)
+- No bursts, no retries within a cycle (next sample is in 60s)
 - Probe goes offline whenever the equipment shed loses power; just stops
   POSTing &mdash; no funny &ldquo;catch up&rdquo; behavior on reconnect
-
-## Live reference
-
-You can hit `https://niece-tweet-flame.ngrok-free.dev/api/current` right now
-to see the format of stored readings my fallback server holds. Same JSON
-shape, with a couple of extra fields the server adds on receipt
-(`_received_at`, `_remote`). Useful as a sanity check while you&rsquo;re
-implementing.
 
 ## Contact
 

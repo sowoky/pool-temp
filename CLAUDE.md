@@ -50,10 +50,10 @@ Probe is strap-mounted to PVC on the return line *after* the filter (active flow
 
 ### Toolchain
 
-- **Editor:** VS Code on Windows (native, not WSL)
-- **Build:** PlatformIO IDE extension
+- **Editor:** any; PlatformIO drives the build
+- **Build:** PlatformIO (`pio run -e esp32dev -t upload`, `-t monitor` for serial). Works on kyle-mac (the primary dev box) — flash/monitor over the USB serial port directly.
 - **Framework:** Arduino on ESP32 (`platform = espressif32`)
-- Project is on Windows filesystem — PlatformIO sees the COM port natively without WSL/usbipd
+- The `tools/*.ps1` helpers are Windows-only conveniences; the cross-platform path is `pio` + the `python tools/*.py` scripts.
 
 ### Firmware behavior (`src/main.cpp`)
 
@@ -62,27 +62,16 @@ Probe is strap-mounted to PVC on the return line *after* the filter (active flow
 - Scans for one of two known WiFi networks at boot (dev SSID + pool SSID)
 - Auto-reconnects on WiFi drop
 - Bounds-checks reading (0–130°F) before POSTing; rejects `DEVICE_DISCONNECTED_F`
-- POSTs JSON `{"sensors":[...], "temp_f":78.4}` with `X-API-Key` header to the configured primary URL; falls over to a fallback URL on non-2xx
+- POSTs JSON `{"sensors":[...], "temp_f":78.4, "fw":"1.1.3", "label":"pool-equip-shed"}` with the `X-API-Key` header to BOTH configured endpoints (`endpoint_1` and `endpoint_2`) every cycle, independently — there is no primary→fallback cascade; each delivery succeeds or fails on its own (`postReading()` in `src/main.cpp`). A blank endpoint is skipped. Payload includes `fw` (firmware version) and `label` (device label).
 - HTTPS endpoints use `setInsecure()` — TLS still encrypts the bytes on the wire, `X-API-Key` is the real auth, and this lets the firmware POST to any HTTPS receiver regardless of CA without us having to manage a root store on a small box
-- ArduinoOTA over WiFi for firmware updates without unscrewing the enclosure
-- mDNS `pool-temp.local` for LAN discovery
+- **Self-update (OTA over HTTPS):** `checkForUpdate()` polls a manifest URL hourly (`au_url`, default the GitHub raw `latest.json`); if its `version` differs from `FW_VERSION` it downloads the referenced binary and reflashes via `httpUpdate` (reboots on success). Controlled by NVS `au_enabled` / `au_url` / `au_period`. See `docs/firmware-releases.md`.
+- ArduinoOTA over WiFi also available for manual pushes without unscrewing the enclosure
+- mDNS `pool-temp.local` for on-device discovery (the device's own mDNS hostname; unrelated to the LAN `.lan` records)
 - Tiny admin web server on port 80 of the device — basic-auth form for editing the endpoint URLs, API key, sample period, label, OTA password (see `src/admin_page.cpp`)
 
 ### Endpoint contract
 
-The HTTP receiver contract is documented in `docs/server-endpoint-spec.md`. Short version:
-
-- `POST /reading` (or whatever path the receiver chooses)
-- `Content-Type: application/json`
-- `X-API-Key: <key>` (default `dev-key`; rotate via admin page)
-- Body: `{"sensors": [{"addr": "16-hex", "temp_f": 78.4}, ...], "temp_f": 78.4}`
-- Any 2xx is success; non-2xx triggers fallback
-
-The firmware's NVS defaults are in `src/config.cpp`:
-- primary  = `http://montesanoclub.org/temps/update`
-- fallback = `https://niece-tweet-flame.ngrok-free.dev/reading`
-
-These are starting values only — the actual running values live in NVS on the device and can be changed via `http://pool-temp.local/` (basic auth) or `tools\update-endpoints.py`.
+Canonical: **`docs/server-endpoint-spec.md`**. Each reading is POSTed to BOTH `endpoint_1` and `endpoint_2` independently (`X-API-Key` auth, JSON body, any 2xx = delivered). The firmware's NVS defaults (`src/config.cpp`) are `endpoint_1 = https://www.montesanoclub.org/temps/update` and `endpoint_2 = https://temp.kyro-labs.com/reading`; running values live in NVS and are editable via `http://pool-temp.local/` (basic auth) or `tools/update-endpoints.py`.
 
 ## Tools
 
@@ -92,8 +81,8 @@ ESP32-side helpers (`tools/`):
 - `monitor.ps1` — serial monitor at 115200
 - `chip-id.ps1` — read MAC + chip rev
 - `show-config.py` — scrape current NVS config + `/status` telemetry from `http://pool-temp.local/`
-- `update-endpoints.py` — push new primary/fallback URLs to the device admin page, then poll for a fresh sample as confirmation
-- `update-fallback.py` — same idea, fallback-only
+- `update-endpoints.py` — push new `endpoint_1`/`endpoint_2` URLs to the device admin page, then poll for a fresh sample as confirmation
+- `update-fallback.py` — same idea, `endpoint_2`-only
 - `tcp-probe.py` — quick connectivity sanity check
 - `disable-services.ps1` — one-time cleanup (run elevated) for the now-removed Caddy + DDNS bits on the Windows host
 
@@ -102,15 +91,13 @@ ESP32-side helpers (`tools/`):
 1. Wire sensor on breadboard, **not** in pool yet
 2. Build & upload — serial should show `DS18B20 devices found: N` and `[wifi] connected ...`
 3. Hand-warm vs. ice-water vs. tap-water sanity check — readings should track
-4. Confirm POST returns 2xx (or that the firmware fails over to the fallback cleanly when primary is unreachable)
+4. Confirm both endpoints return 2xx (each is POSTed independently every cycle; one failing doesn't stop the other)
 5. Build enclosure, mount on PVC, deploy
 
 ## Owner / context
 
-- Kyle Roden, personal project for the neighborhood pool
-- Uses ESP32/embedded comfortably — assume technical fluency; skip the basics
-- Direct/technical communication preferred, no preamble or fluff
-- BrewPiLess background means DS18B20 + OneWire is familiar territory
+- Personal project for the neighborhood pool. Owner background, technical fluency, and comms style live in the `kyle-context` skill + global `claude-config/CLAUDE.md` — not re-derived here.
+- Project-local anecdote: the DS18B20 probe was salvaged from an old BrewPiLess fermenter rig (known good, used in food/liquid for years), so OneWire is familiar territory.
 
 ## Future / nice-to-have
 
