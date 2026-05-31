@@ -8,13 +8,19 @@ POSTs JSON readings to an external HTTP endpoint every ~60 seconds. The
 endpoint is owned by someone else (the club's web admin) — **this repo is
 firmware-only.**
 
-> **Scope note (2026-05-14):** the `website/` and `test-server/`
-> subdirectories are *orphaned* — they're the receiver we ran for early
-> bring-up. They are no longer part of this project; treat them as
-> read-only reference. The Caddy reverse-proxy that fronted that local
-> server has been removed; the Windows service `PoolTempCaddy` is stopped
-> and disabled (see `tools\disable-services.ps1` if you ever need to
-> redo the cleanup on another box).
+> **Scope note (2026-05-14; reconfirmed dead 2026-05-31):** the `website/` and
+> `test-server/` subdirectories are **dead code** — the receiver we ran for early
+> bring-up, no longer part of this project; treat them as read-only reference. The
+> Caddy reverse-proxy that fronted that local server has been removed; the Windows
+> service `PoolTempCaddy` is stopped and disabled (see `tools\disable-services.ps1`).
+>
+> **Keep this repo standalone — do NOT merge it into mswx (Kyle, 2026-05-31).** The
+> fielded ESP32 auto-updates OTA from
+> `raw.githubusercontent.com/sowoky/pool-temp/.../latest.json` (GitHub Actions
+> publishes the `.bin` + manifest on push). Renaming / moving / merging this repo
+> **breaks OTA on the deployed pool controller** — it would silently stop getting
+> firmware updates, or force a manual reflash. The firmware is self-contained and
+> working; leave it where it is. (The only live part of the project IS the firmware.)
 
 ## Hardware
 
